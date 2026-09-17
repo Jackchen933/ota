@@ -1,0 +1,44 @@
+# ===================================================================
+# STM32 OTA 项目 —— 只保留自写代码，排除官方库/第三方组件/编译产物
+# 目的：这份仓库用于 OTA 方案复盘与面试模拟，不是可编译的完整工程
+# ===================================================================
+
+# 注意: 含 "/" 的模式在 .gitignore 里是【相对路径】, 必须带 **/ 前缀
+# 才能匹配到各子工程下的同名目录(Drivers 不含斜杠, 天然匹配任意层级)
+# ----- 官方库与第三方组件（体积大、非自写，面试也不问）-----
+Drivers/
+**/Middlewares/Third_Party/
+**/easylogger/
+**/RTT/
+**/Middlewares/AES/Core/
+**/Middlewares/AES/MDK-ARM/
+
+# ----- Keil MDK 编译产物 -----
+**/MDK-ARM/Objects/
+**/MDK-ARM/Listings/
+**/MDK-ARM/DebugConfig/
+**/MDK-ARM/RTE/
+**/MDK-ARM/*/
+*.o
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.crf
+*.dep
+*.iex
+*.lnp
+*.build_log.htm
+build_check.log
+*.scvd
+
+# ----- 调试器与本地环境 -----
+JLinkLog.txt
+*.uvguix.*
+*.bak
+.mxproject
+session_hex.txt
+
+# ----- 编辑器/AI 工具本地配置 -----
+.claude/

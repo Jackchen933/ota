@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AES 的密钥长什么样 · AES-128 / 192 / 256</title>
+<style>
+  :root {
+    color-scheme: light;
+    --plane:        #f9f9f7;
+    --surface-1:    #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary:#52514e;
+    --text-muted:   #898781;
+    --grid:         #e1e0d9;
+    --baseline:     #c3c2b7;
+    --border:       rgba(11,11,11,0.10);
+    --accent:       #2a78d6;
+    --accent-soft:  #cde2fb;
+    --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plane:        #0d0d0d;
+      --surface-1:    #1a1a19;
+      --text-primary: #ffffff;
+      --text-secondary:#c3c2b7;
+      --text-muted:   #898781;
+      --grid:         #2c2c2a;
+      --baseline:     #383835;
+      --border:       rgba(255,255,255,0.10);
+      --accent:       #3987e5;
+      --accent-soft:  #184f95;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:        #0d0d0d;
+    --surface-1:    #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary:#c3c2b7;
+    --text-muted:   #898781;
+    --grid:         #2c2c2a;
+    --baseline:     #383835;
+    --border:       rgba(255,255,255,0.10);
+    --accent:       #3987e5;
+    --accent-soft:  #184f95;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--plane);
+    color: var(--text-primary);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 40px 24px 72px; }
+
+  header h1 { font-size: 30px; line-height: 1.25; margin: 0 0 10px; letter-spacing: -0.015em; }
+  header p.sub { margin: 0; color: var(--text-secondary); max-width: 74ch; }
+  code {
+    font-family: var(--mono); font-size: 0.9em;
+    background: var(--grid); color: var(--text-primary);
+    padding: 1px 5px; border-radius: 4px;
+  }
+
+  /* ---- 过滤行：一行，位于所有内容之上 ---- */
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    margin: 26px 0 22px; padding: 12px 14px;
+    background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 10px;
+  }
+  .seg { display: inline-flex; background: var(--grid); border-radius: 8px; padding: 2px; }
+  .seg button {
+    font: inherit; font-size: 13px; font-weight: 600;
+    border: 0; background: transparent; color: var(--text-secondary);
+    padding: 5px 14px; border-radius: 6px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .toolbar label { font-size: 13px; color: var(--text-secondary); margin-left: 4px; white-space: nowrap; }
+  .toolbar input {
+    font-family: var(--mono); font-size: 13px;
+    padding: 6px 9px; width: 100%; min-width: 220px;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--baseline); border-radius: 6px;
+  }
+  .toolbar input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .grow { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; }
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 600;
+    padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    background: var(--surface-1); color: var(--text-secondary);
+    border: 1px solid var(--baseline);
+  }
+  .btn:hover { color: var(--text-primary); }
+
+  /* ---- KPI 行 ---- */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .tile .lab { font-size: 12.5px; color: var(--text-secondary); }
+  .tile .val { font-size: 27px; font-weight: 600; line-height: 1.15; margin-top: 3px; }
+  .tile .val .u { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
+  .tile .note { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ---- 卡片 ---- */
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 22px; margin-bottom: 20px;
+  }
+  .card > h2 {
+    font-size: 16px; font-weight: 600; margin: 0 0 4px;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  .card > h2 .kind {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+    color: var(--text-secondary); background: var(--grid);
+    padding: 2px 7px; border-radius: 5px;
+  }
+  .card > p.hint { margin: 0 0 16px; color: var(--text-secondary); font-size: 13.5px; max-width: 78ch; }
+
+  /* ---- 字节网格 ---- */
+  .grid {
+    display: grid; gap: 10px 0; overflow-x: auto;
+    grid-template-columns: max-content 1fr;
+    align-items: center;
+  }
+  .rowhead {
+    font-size: 12px; color: var(--text-secondary);
+    font-family: var(--mono); padding-right: 14px; white-space: nowrap;
+  }
+  .rowhead .tag {
+    display: inline-block; margin-left: 6px; padding: 0 6px;
+    font-family: var(--sans); font-size: 11px; font-weight: 600;
+    color: var(--text-primary); background: var(--accent-soft);
+    border-radius: 999px; vertical-align: 1px;
+  }
+  :root[data-theme="dark"] .rowhead .tag { color: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .rowhead .tag { color: #ffffff; } }
+
+  .cells { display: flex; gap: 2px; }
+  .word { display: flex; gap: 2px; }
+  .word + .word { margin-left: 10px; }
+
+  .cell {
+    width: 40px; height: 30px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 12.5px;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+    cursor: default; user-select: all;
+  }
+  .cell:hover { box-shadow: inset 0 0 0 2px var(--text-primary); }
+
+  /* 索引表头 */
+  .idxrow { display: flex; gap: 2px; margin-bottom: 6px; }
+  .idxrow .word + .word { margin-left: 10px; }
+  .idx {
+    width: 40px; text-align: center; font-family: var(--mono);
+    font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- 递推规则与分步推演 ---- */
+  .rules { display: grid; gap: 10px; }
+  .rule { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .rule .when {
+    font-size: 12px; color: var(--text-secondary); width: 88px; flex: none;
+    line-height: 1.35; text-align: right;
+  }
+  .rule code {
+    font-size: 12.5px; padding: 6px 10px; flex: 1 1 auto;
+    background: var(--grid); overflow-x: auto; white-space: nowrap;
+  }
+  .steps {
+    display: grid; grid-template-columns: max-content max-content 1fr;
+    gap: 8px 16px; align-items: center;
+  }
+  .steps .lab {
+    font-family: var(--mono); font-size: 12px;
+    color: var(--text-secondary); text-align: right; white-space: nowrap;
+  }
+  .steps .note { font-size: 12.5px; color: var(--text-secondary); }
+  .steps .lab.is-result { color: var(--text-primary); font-weight: 600; }
+  .steps .note.is-result { color: var(--text-primary); }
+
+  /* ---- 轮密钥递推链：RK k 的 4 个字逐个推出来 ---- */
+  .chain { display: grid; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+  .chain .crow {
+    display: grid; align-items: center; gap: 9px; min-width: max-content;
+    grid-template-columns: 44px max-content 14px max-content 14px max-content 1fr;
+  }
+  .chain .crow + .crow { padding-top: 8px; border-top: 1px solid var(--grid); }
+  .chain .ci {
+    font-family: var(--mono); font-size: 12.5px; color: var(--text-secondary);
+    text-align: right; white-space: nowrap;
+  }
+  .chain .crow.is-special .ci { color: var(--text-primary); font-weight: 600; }
+  .chain .csym {
+    font-family: var(--mono); font-size: 13px; color: var(--text-muted); text-align: center;
+  }
+  /* max-width 是护栏：说明再长也只会换行，不会把整行撑出卡片 */
+  .chain .cnote { font-size: 11.5px; color: var(--text-muted); padding-left: 4px; max-width: 320px; }
+  .chain .cnote b { color: var(--text-secondary); font-weight: 600; }
+  .chain .cell { width: 34px; height: 26px; font-size: 11.5px; }
+
+  /* ---- 逐字节推演：4 个字节并排，各自走完整条流水线 ---- */
+  .card h3.sub {
+    font-size: 13.5px; font-weight: 600; margin: 26px 0 6px;
+    padding-top: 18px; border-top: 1px solid var(--grid);
+  }
+  .bytes4 {
+    display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 10px 16px; overflow-x: auto; padding-bottom: 2px;
+  }
+  .bcol { min-width: 150px; }
+  .bcol .hd {
+    display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap;
+    font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+    padding-bottom: 6px; margin-bottom: 10px; border-bottom: 1px solid var(--grid);
+  }
+  .bcol .hd .from {
+    font-family: var(--mono); font-size: 11px; font-weight: 400;
+    color: var(--text-muted); white-space: nowrap;
+  }
+  /* 每一段变换的说明行 */
+  .bcol .op {
+    font-size: 11.5px; color: var(--text-secondary); line-height: 1.4;
+    margin: 9px 0 5px; white-space: nowrap;
+  }
+  .bcol .op .rc0 { color: var(--text-muted); }
+  /* 单个字节的彩色格，沿用全局色阶 */
+  .bcol .cell { width: 42px; height: 30px; font-size: 12.5px; }
+  .bcol .cell.is-out { box-shadow: inset 0 0 0 2px var(--text-primary); }
+  /* 二进制竖式 */
+  .xor {
+    display: block; width: max-content;
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    font-variant-numeric: tabular-nums; color: var(--text-secondary);
+    margin: 0 0 3px 2px;
+  }
+  .xor .ln { white-space: pre; }
+  .xor .ln.op2 { border-bottom: 1px solid var(--baseline); padding-bottom: 1px; }
+  .xor .ln.res { color: var(--text-primary); font-weight: 600; }
+
+  /* 提示条：状态色配图标文字，不靠颜色单独表意 */
+  .warn {
+    font-size: 12.5px; color: var(--text-secondary); margin: 0 0 14px;
+    padding: 7px 11px; border-left: 3px solid #fab219;
+    background: var(--grid); border-radius: 0 6px 6px 0;
+  }
+  .warn::before { content: "⚠ "; color: var(--text-primary); }
+
+  /* ---- 状态矩阵 ---- */
+  .matrixwrap { display: flex; gap: 34px; flex-wrap: wrap; align-items: flex-start; }
+  .matrix { border-collapse: separate; border-spacing: 2px; }
+  .matrix th {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    color: var(--text-muted); padding: 0 6px; white-space: nowrap;
+  }
+  .matrix td { padding: 0; }
+  .matrix .cell { width: 52px; height: 40px; font-size: 13.5px; }
+  .colhead { text-align: center; }
+  .matrixnote { font-size: 13px; color: var(--text-secondary); max-width: 40ch; margin: 0; }
+  .matrixnote .formula {
+    display: block; font-family: var(--mono); font-size: 12.5px;
+    color: var(--text-primary); background: var(--grid);
+    padding: 7px 10px; border-radius: 6px; margin: 10px 0 0;
+  }
+
+  /* ---- 顺序色阶图例 ---- */
+  .legend { margin: 4px 0 22px; }
+  .legend .bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; }
+  .legend .bar i { flex: 1; }
+  .legend .ends {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-muted);
+    margin-top: 5px;
+  }
+  .legend .cap { font-size: 13px; color: var(--text-secondary); margin-bottom: 7px; }
+
+  /* ---- 工具提示 ---- */
+  #tip {
+    position: fixed; z-index: 50; pointer-events: none; opacity: 0;
+    transform: translate(-50%, -100%); transition: opacity .1s;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--baseline); border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.14);
+    padding: 8px 11px; font-size: 12.5px; line-height: 1.5;
+    max-width: 280px;
+  }
+  #tip b { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  #tip .k { color: var(--text-secondary); }
+
+  details { margin-top: 4px; }
+  summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+  summary:hover { color: var(--text-primary); }
+  .sboxgrid { display: inline-block; margin-top: 14px; }
+  .sboxgrid .r { display: flex; gap: 2px; }
+  .sboxgrid .r + .r { margin-top: 2px; }
+  .sboxgrid .c {
+    width: 34px; height: 24px; border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .sboxgrid .c.hdr { background: transparent !important; color: var(--text-muted); }
+  .sboxgrid .r .c:first-child { margin-right: 8px; }
+  .sboxgrid .r:first-child { margin-bottom: 8px; }
+
+  footer { margin-top: 34px; color: var(--text-muted); font-size: 12.5px; }
+  footer p { margin: 0 0 6px; }
+</style>
+</head>
+<body data-palette="#2a78d6,#eb6834,#1baf7a,#eda100">
+<div class="wrap">
+
+<header>
+  <h1>AES 的密钥长什么样</h1>
+  <p class="sub">
+    你传给 <code>AES_Init(const unsigned char *pKey)</code> 的是 16 个字节，
+    但芯片里真正用的是 <code>g_roundKeyTable</code> 那张大表。下面是这张表被展开出来的全过程。
+    页面上每个字节都直接用本项目 <code>aes.c</code> 的密钥扩展算出来，三种长度都与 FIPS-197 附录 A 逐字节一致。
+  </p>
+</header>
+
+<div class="toolbar">
+  <div class="seg" id="seg" role="group" aria-label="密钥长度">
+    <button data-kl="128" aria-pressed="true">AES-128</button>
+    <button data-kl="192" aria-pressed="false">AES-192</button>
+    <button data-kl="256" aria-pressed="false">AES-256</button>
+  </div>
+  <span class="grow">
+    <label for="key">密钥</label>
+    <input id="key" spellcheck="false" autocomplete="off">
+  </span>
+  <button class="btn" id="reset">恢复示例密钥</button>
+  <button class="btn" id="theme">深色</button>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<section class="card">
+  <h2>原始密钥 <span class="kind">pKey</span></h2>
+  <p class="hint">
+    这就是你写进代码的那串字节。AES 按 4 字节一个字（word）来读它，所以 16 字节 = <b>Nk = 4</b> 个字，
+    192 位是 6 个字，256 位是 8 个字。下面按字分组显示，每格是一个字节。
+  </p>
+  <p class="warn" id="keywarn" style="display:none"></p>
+  <div id="keyblock"></div>
+</section>
+
+<section class="card">
+  <h2>同样的 16 字节，两种摆法</h2>
+  <p class="hint">
+    密钥在内存里是一维的，但 AES 把它当成 4×4 矩阵用。注意是<b>列优先</b>：
+    下标 0~3 是第一<b>列</b>，不是第一行。代码里所有 <code>state[row + 4 * col]</code> 的写法都来自这条约定。
+  </p>
+  <div class="matrixwrap">
+    <div>
+      <div class="idxrow" id="linidx"></div>
+      <div class="cells" id="linear"></div>
+    </div>
+    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+      <span style="color:var(--text-muted); font-size:20px;">→</span>
+      <div>
+        <table class="matrix" id="matrix"></table>
+      </div>
+      <p class="matrixnote">
+        空格子里填的是同一个字节，只是按 <b>列</b> 往下排。
+        <span class="formula">state[row + 4 * col]</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>轮密钥表 <span class="kind">g_roundKeyTable</span></h2>
+  <p class="hint" id="rkhint"></p>
+  <div class="grid" id="rkblock"></div>
+</section>
+
+<section class="card" id="derivsec">
+  <h2>后面那 10 轮是哪来的 <span class="kind">AES_Init</span></h2>
+  <p class="hint">
+    不是你给的，是从你那几个字节里推出来的。递推规则只有两条，看 <code>aes.c</code> 里
+    <code>AES_Init()</code> 的密钥扩展：
+  </p>
+  <div class="rules">
+    <div class="rule">
+      <span class="when">每 4 个字<br>遇到一次</span>
+      <code>w[i] = w[i-Nk] ^ SubWord(RotWord(w[i-1])) ^ Rcon[i/Nk]</code>
+    </div>
+    <div class="rule">
+      <span class="when">其余情况</span>
+      <code>w[i] = w[i-Nk] ^ w[i-1]</code>
+    </div>
+  </div>
+  <h3 class="sub">RK0 → RK1：16 个字节是怎么来的</h3>
+  <p class="hint">
+    RK1 的 4 个字（<code>w[4]</code> ~ <code>w[7]</code>）逐个推出来。左边是 <code>w[i-Nk]</code>，
+    中间是 <code>temp</code>，右边是结果。只有第 1 行走特殊规则，后 3 行走普通规则——
+    <b>竖着看中间那一列</b>：第 2、3、4 行用的正是上一行刚算出来的结果，一环扣一环。
+  </p>
+  <div class="chain" id="chain"></div>
+
+  <p class="hint" id="derivhint" style="margin-top:18px"></p>
+  <div class="steps" id="derivation"></div>
+
+  <h3 class="sub">四个字节分别走一遍</h3>
+  <p class="hint">
+    上面那张表是横着看的五步，下面是竖着看的：<b>四个字节各自走完自己那条路</b>。
+    异或那两步展开了二进制，一位一位对着看——你会发现<b>只有字节 0 被 Rcon 改动了</b>，
+    另外三个字节的 Rcon 是 <code>00</code>，异或完原样不动。
+  </p>
+  <div class="bytes4" id="bytecols"></div>
+
+  <p class="hint" style="margin:16px 0 0">
+    每一条递推都同时用到 <code>w[i-Nk]</code> 和 <code>w[i-1]</code>，所以你密钥里的<b>任何一个字节改了，
+    后面所有轮密钥都会跟着变</b>。11 组轮密钥看起来互不相关，其实全是同一份密钥的确定性结果——
+    没有任何随机数，也没有外部数据源。把上面输入框改一个字符，这张表会整片换掉。
+  </p>
+</section>
+
+<div class="legend">
+  <div class="cap">格子底色 = 这个字节的值（越深越大）</div>
+  <div class="bar" id="legendbar"></div>
+  <div class="ends"><span>0x00</span><span>0x7F</span><span>0xFF</span></div>
+</div>
+
+<details id="sboxsec">
+  <summary>S 盒（字节代换表）—— 顺带看一眼</summary>
+  <p class="hint" style="margin-top:10px;">
+    密钥扩展里的 SubWord 用的就是这张表。行是高位半字节，列是低位半字节，例如
+    <code>Sbox[0x9a] = 0xb8</code>，查第 9 行第 a 列。它由有限域求逆 + 仿射变换生成，不是随便填的。
+  </p>
+  <div class="sboxgrid" id="sbox"></div>
+</details>
+
+<footer>
+  <p>数据来源：本项目 <code>Algorithms/src/aes.c</code> 的 <code>AES_Init()</code> 实际展开结果，示例密钥取自 FIPS-197 附录 A。</p>
+  <p>AES-128 的 11 组轮密钥已与 FIPS-197 附录 A.1 逐字节核对一致。</p>
+</footer>
+
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+/* ---------------------------------------------------------------------------
+ * 1. 数据：由 aes.c 的 AES_Init 导出，键为密钥长度
+ * -------------------------------------------------------------------------*/
+const DATA = [{"keylen":128,"nk":4,"nb":4,"nr":10,"key":"2b7e151628aed2a6abf7158809cf4f3c","rk":["2b7e151628aed2a6abf7158809cf4f3c","a0fafe1788542cb123a339392a6c7605","f2c295f27a96b9435935807a7359f67f","3d80477d4716fe3e1e237e446d7a883b","ef44a541a8525b7fb671253bdb0bad00","d4d1c6f87c839d87caf2b8bc11f915bc","6d88a37a110b3efddbf98641ca0093fd","4e54f70e5f5fc9f384a64fb24ea6dc4f","ead27321b58dbad2312bf5607f8d292f","ac7766f319fadc2128d12941575c006e","d014f9a8c9ee2589e13f0cc8b6630ca6"],"words":["2b7e1516","28aed2a6","abf71588","09cf4f3c","a0fafe17","88542cb1","23a33939","2a6c7605","f2c295f2","7a96b943","5935807a","7359f67f","3d80477d","4716fe3e","1e237e44","6d7a883b","ef44a541","a8525b7f","b671253b","db0bad00","d4d1c6f8","7c839d87","caf2b8bc","11f915bc","6d88a37a","110b3efd","dbf98641","ca0093fd","4e54f70e","5f5fc9f3","84a64fb2","4ea6dc4f","ead27321","b58dbad2","312bf560","7f8d292f","ac7766f3","19fadc21","28d12941","575c006e","d014f9a8","c9ee2589","e13f0cc8","b6630ca6"],"sbox":[99,124,119,123,242,107,111,197,48,1,103,43,254,215,171,118,202,130,201,125,250,89,71,240,173,212,162,175,156,164,114,192,183,253,147,38,54,63,247,204,52,165,229,241,113,216,49,21,4,199,35,195,24,150,5,154,7,18,128,226,235,39,178,117,9,131,44,26,27,110,90,160,82,59,214,179,41,227,47,132,83,209,0,237,32,252,177,91,106,203,190,57,74,76,88,207,208,239,170,251,67,77,51,133,69,249,2,127,80,60,159,168,81,163,64,143,146,157,56,245,188,182,218,33,16,255,243,210,205,12,19,236,95,151,68,23,196,167,126,61,100,93,25,115,96,129,79,220,34,42,144,136,70,238,184,20,222,94,11,219,224,50,58,10,73,6,36,92,194,211,172,98,145,149,228,121,231,200,55,109,141,213,78,169,108,86,244,234,101,122,174,8,186,120,37,46,28,166,180,198,232,221,116,31,75,189,139,138,112,62,181,102,72,3,246,14,97,53,87,185,134,193,29,158,225,248,152,17,105,217,142,148,155,30,135,233,206,85,40,223,140,161,137,13,191,230,66,104,65,153,45,15,176,84,187,22]},{"keylen":192,"nk":6,"nb":4,"nr":12,"key":"2b7e151628aed2a6abf7158809cf4f3c762b713b07666e9c","rk":["2b7e151628aed2a6abf7158809cf4f3c","762b713b07666e9c19e1cbd3314f1975","9ab80cfd937743c1e55c32fae23a5c66","9babf84baae4e13e305cedc3a32bae02","46779cf8a44dc09e7c11f302d6f5123c","e6a9ffff458251fd03f5cd05a7b80d9b","18c6e75ece33f562289a0a9d6d185b60","6eed9665c9559bfef4d25c833ae1a9e1","127ba37c7f63f81c118e6e79d8dbf587","6d344be257d5e20345ae417f3acdb963","2b43d71af398229d6ba715ef3c72f7ec","79dcb69343110ff06852d8ea9bcafa77","9f8ae0fba3f81717da24a1849935ae74"],"words":["2b7e1516","28aed2a6","abf71588","09cf4f3c","762b713b","07666e9c","19e1cbd3","314f1975","9ab80cfd","937743c1","e55c32fa","e23a5c66","9babf84b","aae4e13e","305cedc3","a32bae02","46779cf8","a44dc09e","7c11f302","d6f5123c","e6a9ffff","458251fd","03f5cd05","a7b80d9b","18c6e75e","ce33f562","289a0a9d","6d185b60","6eed9665","c9559bfe","f4d25c83","3ae1a9e1","127ba37c","7f63f81c","118e6e79","d8dbf587","6d344be2","57d5e203","45ae417f","3acdb963","2b43d71a","f398229d","6ba715ef","3c72f7ec","79dcb693","43110ff0","6852d8ea","9bcafa77","9f8ae0fb","a3f81717","da24a184","9935ae74"]},{"keylen":256,"nk":8,"nb":4,"nr":14,"key":"2b7e151628aed2a6abf7158809cf4f3c762b713b07666e9c0f0e1a2d501f1b21","rk":["2b7e151628aed2a6abf7158809cf4f3c","762b713b07666e9c0f0e1a2d501f1b21","ead1e845c27f3ae369882f6b60476057","a68ba160a1edcffcaee3d5d1fefccef0","585a64fe9a255e1df3ad717693ea1121","7a0c239ddbe1ec61750239b08bfef740","e7326dc37d1733de8eba42a81d505389","de5fce3a05be225b70bc1bebfb42ecab","c3fc0fccbeeb3c1230517eba2d012d33","062316f9039d34a273212f498863c3e2","28d297089639ab1aa668d5a08b69f893","3bda5725384763874b664ccec3058f2c","63a1e626f5984d3c53f0989cd899600f","5a3487536273e4d42915a81aea102736","e96de3a11cf5ae9d4f053601979c560e"],"words":["2b7e1516","28aed2a6","abf71588","09cf4f3c","762b713b","07666e9c","0f0e1a2d","501f1b21","ead1e845","c27f3ae3","69882f6b","60476057","a68ba160","a1edcffc","aee3d5d1","fefccef0","585a64fe","9a255e1d","f3ad7176","93ea1121","7a0c239d","dbe1ec61","750239b0","8bfef740","e7326dc3","7d1733de","8eba42a8","1d505389","de5fce3a","05be225b","70bc1beb","fb42ecab","c3fc0fcc","beeb3c12","30517eba","2d012d33","062316f9","039d34a2","73212f49","8863c3e2","28d29708","9639ab1a","a668d5a0","8b69f893","3bda5725","38476387","4b664cce","c3058f2c","63a1e626","f5984d3c","53f0989c","d899600f","5a348753","6273e4d4","2915a81a","ea102736","e96de3a1","1cf5ae9d","4f053601","979c560e"]}];
+
+const SBOX = DATA[0].sbox;
+
+/* ---------------------------------------------------------------------------
+ * 2. 色阶：单色相，亮->暗。两套步阶分别针对亮/暗画布挑选并校验过
+ *    （单调性 + 每格文字对比度 >= 4.5:1）
+ * -------------------------------------------------------------------------*/
+const RAMP_LIGHT = ["#cde2fb","#b7d3f6","#9ec5f4","#86b6ef","#6da7ec","#5598e7",
+                    "#3987e5","#256abf","#1c5cab","#184f95","#104281","#0d366b"];
+const RAMP_DARK  = ["#184f95","#1c5cab","#256abf","#3987e5","#5598e7","#6da7ec",
+                    "#86b6ef","#9ec5f4","#b7d3f6","#cde2fb"];
+
+function isDark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t === 'dark') return true;
+  if (t === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+/* WCAG 相对亮度与对比度，用来逐格决定文字用墨色还是白色 */
+function lum(hex) {
+  const c = [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16) / 255)
+                     .map(v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+function contrast(a, b) {
+  const x = lum(a), y = lum(b);
+  const hi = Math.max(x, y), lo = Math.min(x, y);
+  return (hi + 0.05) / (lo + 0.05);
+}
+function styleFor(value) {
+  const ramp = isDark() ? RAMP_DARK : RAMP_LIGHT;
+  const i = Math.min(ramp.length - 1, Math.floor(value / 256 * ramp.length));
+  const bg = ramp[i];
+  const ink = contrast(bg, '#ffffff') > contrast(bg, '#0b0b0b') ? '#ffffff' : '#0b0b0b';
+  return 'background:' + bg + ';color:' + ink + ';';
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. AES 密钥扩展（与 aes.c 的 AES_Init 同一套逻辑，用来支持自定义密钥）
+ * -------------------------------------------------------------------------*/
+const RCON = [0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36];
+
+function keyExpansion(key, keyBits) {
+  const Nk = keyBits / 32, Nr = Nk + 6, Nb = 4;
+  const words = 4 * (Nr + 1);           /* 子密钥表一共多少个“字” */
+  const w = new Uint8Array(words * 4);  /* 每个字 4 字节 */
+  let i, j;
+
+  for (i = 0; i < Nk * 4; i++) w[i] = key[i];
+
+  for (i = Nk; i < words; i++) {
+    let t = [w[(i - 1) * 4], w[(i - 1) * 4 + 1], w[(i - 1) * 4 + 2], w[(i - 1) * 4 + 3]];
+
+    if (i % Nk === 0) {
+      t = [t[1], t[2], t[3], t[0]];                       /* RotWord */
+      t = t.map(b => SBOX[b]);                            /* SubWord */
+      t[0] ^= RCON[i / Nk - 1];                           /* 异或轮常量 */
+    } else if (Nk > 6 && i % Nk === 4) {
+      t = t.map(b => SBOX[b]);                            /* SubWord，仅 256 位密钥有 */
+    }
+    for (j = 0; j < 4; j++) w[i * 4 + j] = w[(i - Nk) * 4 + j] ^ t[j];
+  }
+  return { Nk: Nk, Nb: Nb, Nr: Nr, bytes: w };
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. 渲染
+ * -------------------------------------------------------------------------*/
+let keyBits = 128;
+let baseKey = DATA[0].key;     /* 当前长度下的示例密钥（十六进制串） */
+let dirty = false;             /* 用户是否改过密钥（切换长度时保留其输入） */
+let typing = false;            /* 是否正在键盘输入，见 render() 里的回写判断 */
+
+const $ = id => document.getElementById(id);
+
+function hex2(bytes) {
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+function textColorOf(hex) {
+  const ink = contrast(hex, '#ffffff') > contrast(hex, '#0b0b0b') ? '#ffffff' : '#0b0b0b';
+  return ink;
+}
+
+/* 生成一行 4 个字的字节格，cells 为字节值数组，meta(i) 返回该字节的说明 */
+function cellsRow(bytes, start, count, meta) {
+  const row = document.createElement('div');
+  row.className = 'cells';
+  for (let g = 0; g < count / 4; g++) {
+    const word = document.createElement('div');
+    word.className = 'word';
+    for (let k = 0; k < 4; k++) {
+      const idx = start + g * 4 + k;
+      const v = bytes[idx];
+      const d = document.createElement('div');
+      d.className = 'cell';
+      d.setAttribute('style', styleFor(v));
+      d.textContent = v.toString(16).padStart(2, '0');
+      d.dataset.tip = meta ? meta(idx, v) : '';
+      word.appendChild(d);
+    }
+    row.appendChild(word);
+  }
+  return row;
+}
+
+/* 标出轮密钥表里哪些字节直接来自原始密钥：前 Nk 个字就是密钥本身，
+   所以是前 ceil(Nk/4) 组轮密钥各含一段密钥 */
+function rkTag(r, Nk) {
+  const keyWords = Nk, wordsPerRound = 4;
+  if (r * wordsPerRound >= keyWords) return '';
+  const from = r * wordsPerRound, to = Math.min(keyWords, from + wordsPerRound) - 1;
+  if (from === 0 && to === keyWords - 1) return '<span class="tag">= 你的密钥</span>';
+  if (from === 0) return '<span class="tag">密钥前 ' + (to - from + 1) + ' 字节</span>';
+  if (to === keyWords - 1) return '<span class="tag">= 密钥后半段</span>';
+  return '<span class="tag">含密钥尾段</span>';
+}
+
+/* 分步推演 w[Nk]：这条规则每 Nk 个字才遇到一次，也是最能说明问题的一次递推 */
+function renderDerivation(bytes, Nk) {
+  const last = Nk - 1;
+  const wLast = Array.from(bytes.slice(last * 4, last * 4 + 4));
+  const w0    = Array.from(bytes.slice(0, 4));
+  const rot   = [wLast[1], wLast[2], wLast[3], wLast[0]];
+  const sub   = rot.map(b => SBOX[b]);
+  const rc    = [RCON[0], 0, 0, 0];
+  const xrc   = sub.map((b, i) => b ^ rc[i]);
+  const res   = xrc.map((b, i) => b ^ w0[i]);
+
+  const hx = a => a.map(b => b.toString(16).padStart(2, '0')).join(' ');
+  const steps = [
+    ['w[' + last + ']',      wLast, '你的密钥的最后一个字'],
+    ['RotWord →',            rot,   '循环左移 1 个字节：' + hx(wLast) + ' → ' + hx(rot)],
+    ['SubWord →',            sub,   '逐字节查 S 盒'],
+    ['^ Rcon[1] →',          xrc,   '异或轮常量 ' + hx(rc)],
+    ['= w[' + Nk + ']',      res,   '再异或 w[0] = ' + hx(w0) + '，得到 ' + hx(res)]
+  ];
+
+  $('derivhint').innerHTML = '拿 <b>w[' + Nk + ']</b>（也就是 RK1 的头 4 字节）走一遍，' +
+    '下面每个数字都是本页面现算的：';
+
+  const box = $('derivation');
+  box.innerHTML = '';
+  steps.forEach(([lab, arr, note], i) => {
+    const isLast = i === steps.length - 1;
+    const l = document.createElement('div');
+    l.className = 'lab' + (isLast ? ' is-result' : '');
+    l.textContent = lab;
+    const n = document.createElement('div');
+    n.className = 'note' + (isLast ? ' is-result' : '');
+    n.textContent = note;
+    box.appendChild(l);
+    box.appendChild(cellsRow(arr, 0, 4, null));
+    box.appendChild(n);
+  });
+
+  renderChain(bytes, Nk);
+  renderByteColumns(wLast, w0, Nk);
+}
+
+/* RK k → RK k+1：把这一轮的 4 个字逐个推出来，覆盖到 w[i-Nk] 的每一个字节。
+   四条递推里只有第一条走特殊规则，后面三条是 w[i] = w[i-Nk] ^ w[i-1]，
+   而那个 w[i-1] 恰好就是上一行刚算出来的结果，所以竖着看中间那列是一条链。 */
+function renderChain(bytes, Nk) {
+  const box = $('chain');
+  if (!box) return;
+  box.innerHTML = '';
+  const wordAt = i => Array.from(bytes.slice(i * 4, i * 4 + 4));
+
+  for (let i = Nk; i < 2 * Nk; i++) {
+    const left = wordAt(i - Nk);
+    const prev = wordAt(i - 1);
+    const out  = wordAt(i);
+    const isSpecial = (i % Nk) === 0;
+    const isExtra   = (Nk > 6) && ((i % Nk) === 4);
+    let temp, note;
+
+    if (isSpecial) {
+      const rot = [prev[1], prev[2], prev[3], prev[0]];
+      const sub = rot.map(b => SBOX[b]);
+      const rc  = RCON[Math.floor(i / Nk) - 1];
+      temp = sub.map((b, k) => b ^ (k === 0 ? rc : 0));
+      note = '<b>SubWord(RotWord(w[' + (i - 1) + '])) ^ Rcon[' + Math.floor(i / Nk) + ']</b>';
+    } else if (isExtra) {
+      temp = prev.map(b => SBOX[b]);
+      note = '<b>SubWord(w[' + (i - 1) + '])</b> · 仅 256 位';
+    } else {
+      temp = prev;
+      note = 'w[' + (i - 1) + '] 原样';
+    }
+
+    const row = document.createElement('div');
+    row.className = 'crow' + (isSpecial || isExtra ? ' is-special' : '');
+
+    const ci = document.createElement('div');
+    ci.className = 'ci';
+    ci.textContent = 'w[' + i + ']';
+    row.appendChild(ci);
+
+    /* 左操作数：w[i-Nk]，来自你的密钥 */
+    row.appendChild(cellsRow(left, 0, 4, (k, v) =>
+      '<span class="k">w[</span>' + (i - Nk) + '<span class="k">] 第</span> ' + (k + 1) +
+      ' <span class="k">字节 =</span> <b>' + hb(v) + '</b><br><span class="k">你给的密钥的第</span> ' +
+      ((i - Nk) * 4 + k) + ' <span class="k">个字节（0 起算）</span>'));
+
+    const s1 = document.createElement('div');
+    s1.className = 'csym'; s1.textContent = '^';
+    row.appendChild(s1);
+
+    /* 右操作数：temp */
+    row.appendChild(cellsRow(temp, 0, 4, (k, v) =>
+      '<span class="k">temp 第</span> ' + (k + 1) + ' <span class="k">字节 =</span> <b>' + hb(v) +
+      '</b><br>' + (isSpecial ? '<span class="k">由 w[' + (i - 1) + '] 经 RotWord/SubWord 处理而来</span>'
+                              : '<span class="k">就是 w[' + (i - 1) + ']</span>')));
+
+    const s2 = document.createElement('div');
+    s2.className = 'csym'; s2.textContent = '=';
+    row.appendChild(s2);
+
+    /* 结果 */
+    row.appendChild(cellsRow(out, 0, 4, (k, v) =>
+      '<span class="k">w[</span>' + i + '<span class="k">] 第</span> ' + (k + 1) +
+      ' <span class="k">字节 =</span> <b>' + hb(v) + '</b><br><span class="k">轮密钥表第</span> ' +
+      Math.floor(i / 4) + ' <span class="k">行第</span> ' + (i % 4) + ' <span class="k">组</span>'));
+
+    const nt = document.createElement('div');
+    nt.className = 'cnote';
+    nt.innerHTML = note;
+    row.appendChild(nt);
+
+    box.appendChild(row);
+  }
+}
+
+/* ---- 逐字节推演的零件 ---- */
+const hb  = v => v.toString(16).padStart(2, '0');                       /* 一个字节的十六进制 */
+const bits = v => v.toString(2).padStart(8, '0').replace(/^(.{4})/, '$1 ');  /* 8 位二进制，半字节分开 */
+
+/* 一个彩色字节格，tip 为悬停说明（可为空） */
+function byteCell(v, tip, extraCls) {
+  const d = document.createElement('div');
+  d.className = 'cell' + (extraCls ? ' ' + extraCls : '');
+  d.setAttribute('style', styleFor(v));
+  d.textContent = hb(v);
+  if (tip) d.dataset.tip = tip;
+  return d;
+}
+
+/* 一段变换的说明行，html 允许内嵌 <span class="rc0"> 之类 */
+function stageOp(html) {
+  const d = document.createElement('div');
+  d.className = 'op';
+  d.innerHTML = html;
+  return d;
+}
+
+/* 二进制竖式：a ^ b = r，三行对齐，中间那行带下划线 */
+function xorBlock(a, b, r) {
+  const box = document.createElement('div');
+  box.className = 'xor';
+  [['  ' + bits(a), ''],
+   ['^ ' + bits(b), 'op2'],
+   ['  ' + bits(r), 'res']].forEach(([text, cls]) => {
+    const ln = document.createElement('div');
+    ln.className = 'ln' + (cls ? ' ' + cls : '');
+    ln.textContent = text;
+    box.appendChild(ln);
+  });
+  return box;
+}
+
+/* 把 w[Nk] 的 4 个字节各自走一遍：RotWord 取字节 → SubWord → ^Rcon[1] → ^w[0] */
+function renderByteColumns(wLast, w0, Nk) {
+  const box = $('bytecols');
+  if (!box) return;
+  box.innerHTML = '';
+
+  for (let p = 0; p < 4; p++) {
+    const srcIdx  = (p + 1) % 4;          /* RotWord 左移 1 字节：第 (p+1)%4 个挪到第 p 位 */
+    const srcByte = wLast[srcIdx];
+    const s       = SBOX[srcByte];        /* SubWord */
+    const rc      = p === 0 ? RCON[0] : 0;/* Rcon[1] 只有第 1 个字节非零 */
+    const x       = s ^ rc;
+    const w0b     = w0[p];
+    const out     = x ^ w0b;
+
+    const col = document.createElement('div');
+    col.className = 'bcol';
+
+    /* 列头：这是第几个字节，值从 w[Nk-1] 的哪一位来 */
+    const hd = document.createElement('div');
+    hd.className = 'hd';
+    hd.innerHTML = '<span>字节 ' + p + '</span><span class="from">w[' + (Nk - 1) +
+                   '] 的第 ' + (srcIdx + 1) + ' 个</span>';
+    col.appendChild(hd);
+
+    /* ① RotWord */
+    col.appendChild(stageOp('↓ RotWord 左移 1 字节'));
+    col.appendChild(byteCell(srcByte,
+      'w[' + (Nk - 1) + '] 的第 ' + (srcIdx + 1) + ' 个字节<span class="k"> = </span><b>' + hb(srcByte) +
+      '</b><br><span class="k">RotWord 把它挪到第</span> ' + (p + 1) + ' <span class="k">位</span>'));
+
+    /* ② SubWord */
+    col.appendChild(stageOp('↓ SubWord 查 S 盒'));
+    col.appendChild(byteCell(s,
+      'SubWord<span class="k">: </span>Sbox[0x' + hb(srcByte) + ']<span class="k"> = </span><b>0x' + hb(s) +
+      '</b><br><span class="k">查第</span> ' + srcByte.toString(16)[0] + ' <span class="k">行第</span> ' +
+      srcByte.toString(16)[1] + ' <span class="k">列</span>'));
+
+    /* ③ ^ Rcon[1] */
+    col.appendChild(stageOp('↓ 异或 Rcon[1] 的 ' + hb(rc) +
+      (rc === 0 ? ' <span class="rc0">（等于没变）</span>' : '')));
+    col.appendChild(xorBlock(s, rc, x));
+    col.appendChild(byteCell(x, 'Rcon<span class="k">: </span>只有第 1 个字节是 <b>0x' + hb(RCON[0]) +
+      '</b>，后三个恒为 0x00'));
+
+    /* ④ ^ w[0] */
+    col.appendChild(stageOp('↓ 异或 w[0] 的 ' + hb(w0b)));
+    col.appendChild(xorBlock(x, w0b, out));
+    col.appendChild(byteCell(out, '再异或 w[0] 的第 ' + (p + 1) + ' 个字节 <b>' + hb(w0b) + '</b>', 'is-out'));
+
+    box.appendChild(col);
+  }
+}
+
+function idxRow(count, start) {
+  const row = document.createElement('div');
+  row.className = 'idxrow';
+  for (let g = 0; g < count / 4; g++) {
+    const word = document.createElement('div');
+    word.className = 'word';
+    for (let k = 0; k < 4; k++) {
+      const s = document.createElement('span');
+      s.className = 'idx';
+      s.textContent = start + g * 4 + k;
+      word.appendChild(s);
+    }
+    row.appendChild(word);
+  }
+  return row;
+}
+
+function render() {
+  const src = dirty ? baseKey : (DATA.find(d => d.keylen === keyBits) || DATA[0]).key;
+  const need = keyBits / 8;
+  let hex = src.replace(/[^0-9a-fA-F]/g, '');
+  let short = hex.length < need * 2;
+  hex = (hex + '0'.repeat(need * 2)).slice(0, need * 2);
+
+  const key = new Uint8Array(need);
+  for (let i = 0; i < need; i++) key[i] = parseInt(hex.substr(i * 2, 2), 16);
+
+  const ex = keyExpansion(key, keyBits);
+  const { Nk, Nr, bytes } = ex;
+  const tableBytes = 16 * (Nr + 1);   /* 4 × Nb × (Nr+1)，Nb 恒为 4，所以是 16 × (Nr+1) */
+
+  /* 只在用户正在键盘输入时不回写，否则敲到一半就被补齐、光标也乱；
+     其余情况（切长度、恢复示例、带 ?key= 打开）都要把输入框对齐到实际用的密钥 */
+  if (!typing) $('key').value = hex;
+  $('keywarn').textContent = short
+    ? '输入的十六进制不足 ' + (need * 2) + ' 个字符，渲染时后面按 0x00 补齐了。'
+    : '';
+  $('keywarn').style.display = short ? '' : 'none';
+
+  /* KPI */
+  const kpi = [
+    ['密钥长度', keyBits, '位', 'AES_KEY_LENGTH'],
+    ['Nk', Nk, '字', 'AES_KEY_LENGTH / 32'],
+    ['轮数 Nr', Nr, '轮', 'Nk + 6'],
+    ['子密钥表', tableBytes, '字节', '4 × Nb × (Nr+1)']
+  ];
+  $('kpis').innerHTML = kpi.map(([lab, val, u, note]) =>
+    '<div class="tile"><div class="lab">' + lab + '</div>' +
+    '<div class="val">' + val + '<span class="u">' + u + '</span></div>' +
+    '<div class="note"><code>' + note + '</code></div></div>').join('');
+
+  /* 原始密钥：按字分组 */
+  const kb = $('keyblock');
+  kb.innerHTML = '';
+  const nkGrid = document.createElement('div');
+  nkGrid.className = 'grid';
+  const rows = Math.ceil(Nk / 4);
+  for (let r = 0; r < rows; r++) {
+    const h = document.createElement('div');
+    h.className = 'rowhead';
+    const from = r * 4, to = Math.min(Nk, from + 4) - 1;
+    h.textContent = from === to ? 'W[' + from + ']' : 'W[' + from + '…' + to + ']';
+    nkGrid.appendChild(h);
+    nkGrid.appendChild(cellsRow(key, r * 16, Math.min(Nk - r * 4, 4) * 4,
+      (i, v) => '<span class="k">密钥字节</span> #' + i + '<br><span class="k">值</span> <b>0x' +
+                v.toString(16).padStart(2, '0') + '</b> = ' + v + '<br><span class="k">属于</span> W[' +
+                Math.floor(i / 4) + '] 第 ' + (i % 4) + ' 字节'));
+  }
+  kb.appendChild(nkGrid);
+
+  /* 两种摆法：一维 + 4×4 列优先矩阵 */
+  const sixteen = key.slice(0, 16);
+  $('linidx').replaceWith(Object.assign(idxRow(16, 0), { id: 'linidx' }));
+  $('linear').replaceWith(Object.assign(cellsRow(sixteen, 0, 16,
+    (i, v) => '<span class="k">第</span> ' + i + ' <span class="k">个字节</span><br><span class="k">值</span> <b>0x' +
+              v.toString(16).padStart(2, '0') + '</b>'), { id: 'linear' }));
+
+  const mt = $('matrix');
+  mt.innerHTML = '';
+  const head = document.createElement('tr');
+  head.innerHTML = '<th></th>' + [0, 1, 2, 3].map(c => '<th class="colhead">列 ' + c + '</th>').join('');
+  mt.appendChild(head);
+  for (let r = 0; r < 4; r++) {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th');
+    th.textContent = '行 ' + r;
+    tr.appendChild(th);
+    for (let c = 0; c < 4; c++) {
+      const i = r + 4 * c;
+      const v = sixteen[i];
+      const td = document.createElement('td');
+      const d = document.createElement('div');
+      d.className = 'cell';
+      d.setAttribute('style', styleFor(v));
+      d.textContent = v.toString(16).padStart(2, '0');
+      d.dataset.tip = '<span class="k">行</span> ' + r + ' <span class="k">列</span> ' + c +
+        '<br><span class="k">一维下标</span> row + 4*col = ' + r + ' + 4×' + c + ' = <b>' + i + '</b>' +
+        '<br><span class="k">值</span> <b>0x' + v.toString(16).padStart(2, '0') + '</b>';
+      td.appendChild(d);
+      tr.appendChild(td);
+    }
+    mt.appendChild(tr);
+  }
+
+  /* 轮密钥表 */
+  const rk = DATA.find(d => d.keylen === keyBits);
+  $('rkhint').innerHTML = '密钥扩展把 ' + need +
+    ' 字节的密钥摊成了 <b>' + (Nr + 1) + ' 组</b>轮密钥，每组 16 字节（4 个字），一共 <b>' + tableBytes +
+    ' 字节</b>，是原始密钥的 ' + (tableBytes / need).toFixed(0) + ' 倍。加密时第 r 轮就取第 r 组。';
+
+  const rkBlock = $('rkblock');
+  rkBlock.innerHTML = '';
+  for (let r = 0; r <= Nr; r++) {
+    const h = document.createElement('div');
+    h.className = 'rowhead';
+    h.innerHTML = 'RK ' + r + rkTag(r, Nk);
+    rkBlock.appendChild(h);
+    rkBlock.appendChild(cellsRow(bytes, r * 16, 16,
+      (i, v) => '<span class="k">轮</span> ' + r + ' <span class="k">第</span> ' + (i % 16) +
+                ' <span class="k">字节</span><br><span class="k">值</span> <b>0x' +
+                v.toString(16).padStart(2, '0') + '</b><br><span class="k">w[</span>' +
+                (r * 4 + Math.floor((i % 16) / 4)) + '<span class="k">]</span>'));
+  }
+
+  /* 分步推演 */
+  renderDerivation(bytes, Nk);
+
+  /* 图例 */
+  const ramp = isDark() ? RAMP_DARK : RAMP_LIGHT;
+  $('legendbar').innerHTML = ramp.map(c => '<i style="background:' + c + '"></i>').join('');
+
+  /* S 盒 */
+  const sb = $('sbox');
+  sb.innerHTML = '';
+  const hdr = document.createElement('div');
+  hdr.className = 'r';
+  hdr.innerHTML = '<div class="c hdr"></div>' +
+    [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map(c =>
+      '<div class="c hdr">' + c.toString(16) + '</div>').join('');
+  sb.appendChild(hdr);
+  for (let r = 0; r < 16; r++) {
+    const row = document.createElement('div');
+    row.className = 'r';
+    let html = '<div class="c hdr">' + r.toString(16) + '</div>';
+    for (let c = 0; c < 16; c++) {
+      const v = SBOX[r * 16 + c];
+      html += '<div class="c" style="' + styleFor(v) + '" data-tip="Sbox[0x' +
+        r.toString(16) + c.toString(16) + '] = 0x' + v.toString(16).padStart(2, '0') +
+        '<br><span class=\'k\'>行</span> ' + r.toString(16) + ' <span class=\'k\'>列</span> ' + c.toString(16) +
+        '">' + v.toString(16).padStart(2, '0') + '</div>';
+    }
+    row.innerHTML = html;
+    sb.appendChild(row);
+  }
+
+  bindTips();
+}
+
+/* ---------------------------------------------------------------------------
+ * 5. 悬停提示
+ * -------------------------------------------------------------------------*/
+function bindTips() {
+  document.querySelectorAll('[data-tip]').forEach(el => {
+    if (!el.dataset.tip) return;
+    el.addEventListener('mouseenter', e => {
+      const t = $('tip');
+      t.innerHTML = el.dataset.tip;
+      t.style.opacity = '1';
+      moveTip(e);
+    });
+    el.addEventListener('mousemove', moveTip);
+    el.addEventListener('mouseleave', () => { $('tip').style.opacity = '0'; });
+  });
+}
+function moveTip(e) {
+  const t = $('tip');
+  t.style.left = e.clientX + 'px';
+  t.style.top = (e.clientY - 10) + 'px';
+}
+
+/* ---------------------------------------------------------------------------
+ * 6. 交互
+ * -------------------------------------------------------------------------*/
+$('seg').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  keyBits = +b.dataset.kl;
+  /* 不重置 dirty：用户粘了自己的密钥，切长度时保留它，只是按新长度补齐 */
+  [...$('seg').children].forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  render();
+});
+
+$('key').addEventListener('input', () => {
+  baseKey = $('key').value;
+  dirty = true;
+  typing = true;
+  renderKeepFocus();
+  typing = false;
+});
+
+$('reset').addEventListener('click', () => {
+  dirty = false;
+  render();
+});
+
+$('theme').addEventListener('click', () => {
+  const dark = !isDark();
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  $('theme').textContent = dark ? '浅色' : '深色';
+  renderKeepFocus();
+});
+
+/* 重渲染时不要把光标从输入框里踢出去 */
+let focusKey = false;
+function renderKeepFocus() {
+  const active = document.activeElement === $('key');
+  const pos = $('key').selectionStart;
+  render();
+  if (active) { $('key').focus(); try { $('key').setSelectionRange(pos, pos); } catch (e) {} }
+}
+
+if (window.matchMedia('(prefers-color-scheme: dark)').matches) $('theme').textContent = '浅色';
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => renderKeepFocus());
+
+/* 支持 ?kl=256&theme=dark&key=...&sbox=1&go=<元素id> 直接打开某个状态 */
+let scrollTo = '';
+(function () {
+  const q = new URLSearchParams(location.search);
+  const kl = q.get('kl');
+  if (kl && ['128', '192', '256'].indexOf(kl) >= 0) {
+    keyBits = +kl;
+    [...$('seg').children].forEach(x => x.setAttribute('aria-pressed', String(x.dataset.kl === kl)));
+  }
+  const th = q.get('theme');
+  if (th === 'dark' || th === 'light') {
+    document.documentElement.setAttribute('data-theme', th);
+    $('theme').textContent = th === 'dark' ? '浅色' : '深色';
+  }
+  const k = q.get('key');
+  if (k) { baseKey = k; dirty = true; }
+  if (q.get('sbox')) { document.querySelector('details').open = true; scrollTo = 'sboxsec'; }
+  if (q.get('go')) scrollTo = q.get('go');
+})();
+
+render();
+if (scrollTo) { const t = $(scrollTo); if (t) t.scrollIntoView(); }
+</script>
+</body>
+</html>
