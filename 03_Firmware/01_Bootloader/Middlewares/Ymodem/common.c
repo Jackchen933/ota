@@ -345,16 +345,20 @@ void GetInputString (uint8_t * buffP)
 *******************************************************************************/
 uint32_t FLASH_PagesMask(__IO uint32_t Size)
 {
+    /* 遗留IAP菜单用的函数, 目前无人调用。
+       PAGE_SIZE 宏已从 common.h 删除(与 w25qxx.h 结构体成员冲突),
+       这里用局部常量代替, 语义不变(16KB) */
+    const uint32_t FLASH_PAGE = 0x4000;
     uint32_t pagenumber = 0x0;
     uint32_t size = Size;
 
-    if ((size % PAGE_SIZE) != 0)
+    if ((size % FLASH_PAGE) != 0)
     {
-        pagenumber = (size / PAGE_SIZE) + 1;
+        pagenumber = (size / FLASH_PAGE) + 1;
     }
     else
     {
-        pagenumber = size / PAGE_SIZE;
+        pagenumber = size / FLASH_PAGE;
     }
     return pagenumber;
 }

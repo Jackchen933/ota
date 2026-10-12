@@ -35,7 +35,7 @@ extern "C" {
 extern SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN Private defines */
-
+extern SPI_HandleTypeDef hspi2;   /* 屏幕专用（screen_hw.c 初始化），与 SPI1/W25Q64 无关 */
 /* USER CODE END Private defines */
 
 void MX_SPI1_Init(void);

@@ -45,7 +45,11 @@
 ;   <o> Stack Size (in Bytes) <0x0-0xFFFFFFFF:8>
 ; </h>
 
-Stack_Size      EQU     0x00000400
+; 2026-10-11: 0x400(1KB) -> 0x1000(4KB). Ymodem_Receive() has ~1.1KB of locals
+; (packet_data[1029] + ...), so its stack frame reached below the 1KB stack
+; bottom and stomped the adjacent statics (s_u8_W25Q_Ready at 0x20002004 sits
+; right under the stack). RAM budget is fine: ~9.2KB used of 128KB.
+Stack_Size      EQU     0x00001000
 
                 AREA    STACK, NOINIT, READWRITE, ALIGN=3
 Stack_Mem       SPACE   Stack_Size

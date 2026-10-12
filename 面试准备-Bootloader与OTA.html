@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bootloader与OTA · 面试闯关特训</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Microsoft YaHei",sans-serif;font-size:17px;line-height:1.85;color:#222;background:#8ed1ea;padding:14px 20px;max-width:1280px;margin:0 auto}
+.wrap{display:flex;gap:22px;align-items:flex-start}
+aside{width:250px;flex-shrink:0;position:sticky;top:14px}
+.nav-title{background:#222;color:#ffd93d;text-align:center;font-weight:900;letter-spacing:4px;padding:8px;border:4px solid #222;box-shadow:4px 4px 0 rgba(34,34,34,.25)}
+.nav-main{background:#ffd93d;border:4px solid #222;box-shadow:4px 4px 0 #222;text-align:center;font-weight:900;font-size:19px;padding:10px 6px;margin-top:10px}
+.nav-sub{background:#fffbea;border:3px solid #222;box-shadow:3px 3px 0 #222;text-align:center;font-size:12px;color:#555;padding:5px;margin-top:10px}
+nav{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+nav a{display:block;background:#fff;border:3px solid #222;box-shadow:3px 3px 0 #222;color:#222;text-decoration:none;font-size:13.5px;font-weight:bold;padding:7px 10px;transition:all .15s steps(2)}
+nav a:hover{background:#ffd93d;transform:translate(-2px,-2px);box-shadow:5px 5px 0 #222}
+nav a.active{background:#1a6fc4;color:#fff}
+.tip{margin-top:14px;background:#e4fbe4;border:3px solid #222;box-shadow:3px 3px 0 #222;font-size:12px;padding:8px;color:#1d7a3e;font-weight:bold}
+main{flex:1;min-width:0}
+.hero{background:#fffbea;border:4px solid #222;box-shadow:0 -4px 0 0 #222,0 4px 0 0 #222,-4px 0 0 0 #222,4px 0 0 0 #222,8px 8px 0 rgba(34,34,34,.2);padding:22px;margin-bottom:20px}
+.hero .tag{display:inline-block;background:#222;color:#ffd93d;letter-spacing:6px;font-size:12px;padding:4px 12px;font-weight:900}
+.hero h1{font-weight:900;font-size:26px;margin-top:8px;text-shadow:3px 3px 0 #ffd93d}
+.hero p{font-size:14px;color:#555;margin-top:6px}
+.panel{background:#fffbea;border:4px solid #222;box-shadow:0 -4px 0 0 #222,0 4px 0 0 #222,-4px 0 0 0 #222,4px 0 0 0 #222,8px 8px 0 rgba(34,34,34,.2);margin-bottom:22px;padding:16px 18px}
+.level-tag{display:inline-block;background:#ffd93d;border:3px solid #222;box-shadow:3px 3px 0 #222;font-weight:900;padding:2px 12px;font-size:14px;letter-spacing:2px}
+.level h2{font-weight:900;font-size:21px;margin-top:8px}
+.q{background:#fff;border:4px solid #222;box-shadow:5px 5px 0 #222;padding:12px 14px;margin:14px 0 10px}
+.q .who{display:inline-block;background:#e84c3d;color:#fff;font-weight:900;font-size:12px;padding:1px 10px;letter-spacing:2px;border:2px solid #222}
+.q .qt{font-weight:900;margin-top:4px}
+.green{background:#e4fbe4;border:3px solid #222;padding:10px 14px;margin:10px 0}
+.green .bt{font-weight:900;color:#1d7a3e}
+.blue{background:#e8f6ff;border:3px solid #222;padding:10px 14px;margin:10px 0}
+.blue .bt{font-weight:900;color:#1a6fc4}
+.red{background:#ffe3e3;border:3px solid #222;padding:10px 14px;margin:10px 0}
+.red .bt{font-weight:900;color:#c0392b}
+.orange{background:#ffeacc;border:3px solid #222;padding:10px 14px;margin:10px 0}
+.orange .bt{font-weight:900;color:#b34700}
+ul{list-style:none;padding-left:4px}
+ul li{margin:4px 0;padding-left:16px;position:relative}
+ul li::before{content:"▪";color:#e0a300;position:absolute;left:0;font-weight:900}
+b.kw{color:#c41e3a}
+.code{font-family:Consolas,monospace;background:#fff;border:3px solid #222;box-shadow:4px 4px 0 #222;padding:10px 14px;font-size:14px;margin:10px 0;overflow-x:auto;white-space:pre}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+th{background:#222;color:#ffd93d;border:3px solid #222;padding:6px 8px;text-align:left}
+td{border:3px solid #222;padding:6px 8px;background:#fff}
+tr:nth-child(even) td{background:#f4f4f4}
+td.hl{background:#ffd93d;font-weight:900}
+figure{background:#fff;border:4px solid #222;box-shadow:6px 6px 0 #222;padding:12px;margin:12px 0;text-align:center}
+figcaption{font-size:12px;color:#666;margin-top:6px;text-align:center}
+.cloud{position:fixed;top:60px;left:70%;z-index:-1;opacity:.9}
+.cloud i{position:absolute;background:#fff;display:block}
+.c1{width:60px;height:22px}.c2{width:22px;height:22px;left:14px;top:-18px}.c3{width:22px;height:22px;left:34px;top:-18px}
+@keyframes drift{0%{transform:translateX(0)}50%{transform:translateX(40px)}100%{transform:translateX(0)}}
+.cloud{animation:drift 16s steps(12) infinite}
+@media (max-width:900px){.wrap{flex-direction:column}aside{position:static;width:100%}nav{flex-direction:row;flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<div class="cloud"><i class="c1"></i><i class="c2"></i><i class="c3"></i></div>
+<div class="cloud" style="top:180px;left:84%;animation-delay:-8s"><i class="c1"></i><i class="c2"></i><i class="c3"></i></div>
+
+<div class="wrap">
+<aside>
+  <div class="nav-title">INTERVIEW</div>
+  <div class="nav-main">Bootloader & OTA<br>面试特训</div>
+  <div class="nav-sub">七关 · 从开场白到高压追问<br>对应简历 TXW81x 实习四条 bullet</div>
+  <nav id="nav">
+    <a href="#lv1">▶ L1 开场60秒</a>
+    <a href="#lv2">▶ L2 分区与跳转</a>
+    <a href="#lv3">▶ L3 标志扇区状态机</a>
+    <a href="#lv4">▶ L4 Ymodem双线程</a>
+    <a href="#lv5">▶ L5 加密与双层校验</a>
+    <a href="#lv6">▶ L6 看门狗与回滚(BOSS)</a>
+    <a href="#lv7">▶ L7 高压追问与反问</a>
+  </nav>
+  <div class="tip">✔ 每题先背绿色盒的骨架<br>✔ 红盒是死亡回答，考前必读<br>✔ 所有关键词都能指到代码</div>
+</aside>
+
+<main>
+<div class="hero">
+  <span class="tag">INTERVIEW QUEST</span>
+  <h1>Bootloader 与 OTA 面试特训</h1>
+  <p>你会的是流程，面试官听的是话术。本页把项目代码翻译成「先说什么 → 再说什么 → 必点哪些词 → 哪些回答会死」。<br>原则：每句话都要能落到代码；落到代码的每句话都要敢被追问三层。</p>
+</div>
+
+<!-- ============ LEVEL 1 ============ -->
+<section class="level panel" id="lv1">
+  <span class="level-tag">LEVEL 1</span>
+  <h2>开场60秒：项目介绍定生死</h2>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">简单介绍一下这个项目吧。</div></div>
+  <div class="green"><span class="bt">回答骨架（背下来，60秒内讲完）：</span>
+    <ul>
+      <li><b class="kw">一句话定位</b>：这是一个完整的设备端 OTA 升级系统——Bootloader 和 App 双工程独立开发联调，实现设备在业务不中断的情况下后台完成固件升级。</li>
+      <li><b class="kw">一句话链路</b>：全链路是「App后台下载密文到外部Flash → 置标志复位 → Bootloader解密搬运校验 → 新固件试用期验证 → 通过才备份转正，失败自动回滚」。</li>
+      <li><b class="kw">两个亮点预埋</b>（引面试官来问，别一口气讲完）：一是升级标志的掉电安全设计，二是看门狗试用期+自动回滚，升级失败不变砖。</li>
+      <li><b class="kw">角色收尾</b>：Bootloader 和 App 两侧都是我独立完成的。</li>
+    </ul>
+  </div>
+  <div class="red"><span class="bt">死亡回答：</span>
+    <ul>
+      <li>从Ymodem帧格式开始讲细节——开场要给全景，细节留给追问。</li>
+      <li>"我做了Ymodem移植、写了Flash驱动、调了DMA……"——流水账，没有架构感。</li>
+      <li>超过90秒——面试官失去耐心，后续全在打断中崩盘。</li>
+    </ul>
+  </div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">整个流程再走一遍？上电之后发生了什么？</div></div>
+  <div class="green"><span class="bt">回答骨架（画图讲，边说边画状态机）：</span>
+    <ul>
+      <li>上电先进 Bootloader（它在 Flash 最前面 0x08000000，硬件决定绕不开），读<b class="kw">标志扇区</b>里的 App 运行状态，五路分发。</li>
+      <li><b class="kw">0x44 有效App</b> → 直接跳 App（日常开机，毫秒级，感知不到）。</li>
+      <li><b class="kw">0x11 下载待更新</b> → 子流程A：读密文大小→擦运行区→从外部Flash下载区<b class="kw">边解密边搬运</b>→MD5比对→通过置 0x22 复位。</li>
+      <li><b class="kw">0x22 验证新App</b> → 子流程B：开 IWDG → 跳 App 试用期（App自检通过置 0x33 再复位）；如果这次复位是看门狗造成的 → 直接转回滚。</li>
+      <li><b class="kw">0x33 备份</b> → 子流程E：把下载区密文复制到备份区 → 置 0x44 转正复位。</li>
+      <li><b class="kw">其他/空白</b> → 路径D：备份区有效就回滚，否则待机等按键 Ymodem 刷机。</li>
+    </ul>
+  </div>
+  <div class="orange"><span class="bt">加分动作：</span>画完图补一句"这套状态机的核心思想是<b>每一步都可以安全地重来</b>——任何时刻掉电，标志扇区里的状态都对应一条确定的恢复路径"。面试官听到这句就知道你懂掉电安全。</div>
+</section>
+
+<!-- ============ LEVEL 2 ============ -->
+<section class="level panel" id="lv2">
+  <span class="level-tag">LEVEL 2</span>
+  <h2>分区与跳转</h2>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">分区怎么设计的？为什么这么划？</div></div>
+  <div class="green"><span class="bt">回答骨架：</span>
+    <ul>
+      <li>先报芯片底账：F411 共 512KB，Flash 扇区<b class="kw">非均匀</b>——前4个16KB、1个64KB、后3个128KB。</li>
+      <li>内部三段：<b class="kw">Bootloader 32KB</b>（扇区0-1，放小扇区擦得快）、<b class="kw">标志扇区16KB</b>（扇区2，独立出来是因为改标志要整扇区擦，绝不能和App混在扇区里互相擦掉）、<b class="kw">App运行区464KB</b>（扇区3-7）。</li>
+      <li>外部 W25Q64 两段：<b class="kw">下载区A 512KB</b>（新固件密文）+ <b class="kw">备份区B 512KB</b>（验证通过的旧固件备份）。放外部是因为内部空间不够双份，且外部Flash写不占用内部总线。</li>
+      <li>收尾：App 链接起始地址 0x0800C000、大小受限 0x74000，向量表偏移 0xC000，三处同步改。</li>
+    </ul>
+  </div>
+  <div class="red"><span class="bt">死亡回答：</span>"按流程图划的"——面试官要听的是<b>约束推导</b>：为什么标志扇区必须独立、为什么备份放外部，答不出推导就露馅。</div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">从 Bootloader 跳到 App 具体做了什么？</div></div>
+  <div class="green"><span class="bt">回答骨架（背跳转五步，顺序不能乱）：</span>
+    <ul>
+      <li>① 校验：App 向量表第0项（栈顶指针）要指向 RAM 区间，否则不跳。</li>
+      <li>② <b class="kw">跳前喂狗</b>：IWDG 一旦开启关不掉，跳过去到 App 接管前有几秒空窗，先把计数拉满。</li>
+      <li>③ <b class="kw">关外设、关中断</b>：尤其停掉呼吸灯定时器——它的中断每50µs改写LED引脚，不关会持续打断 App。</li>
+      <li>④ <b class="kw">向量表重映射</b>到 App 起始地址（0x0800C000）。</li>
+      <li>⑤ 取 App 向量表第0项设 <b class="kw">MSP</b>，取第1项当复位向量跳过去。</li>
+    </ul>
+  </div>
+  <div class="blue"><span class="bt">为什么这样做：</span>跳转本质是"软件伪造一次复位后的取指"——复位后 CPU 做的就是读0x0800C000处的栈顶和复位向量。谁先设置MSP、谁关中断，一步都不能省，省了就是 HardFault。</div>
+  <div class="q"><span class="who">面试官</span><div class="qt">追问：App 里为什么还要再设一次向量表？</div></div>
+  <div class="green"><span class="bt">回答：</span>Bootloader 设置的向量表只保证<b>跳转那一刻</b>取指正确；App 跑起来一旦发生中断，硬件固定从 VTOR 指向的表取向量。App 在 system 启动文件里把 <b class="kw">VECT_TAB_OFFSET 设成 0xC000</b>，让所有中断都进 App 自己的中断服务函数——漏了这步，中断会跳进 Bootloader 的表，直接跑飞。</div>
+</section>
+
+<!-- ============ LEVEL 3 ============ -->
+<section class="level panel" id="lv3">
+  <span class="level-tag">LEVEL 3</span>
+  <h2>标志扇区状态机（掉电安全核心）</h2>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">升级标志为什么放在内部Flash独立扇区？用EEPROM不行吗？</div></div>
+  <div class="green"><span class="bt">回答骨架：</span>
+    <ul>
+      <li>候选方案三个：EEPROM、外部Flash、内部Flash独立扇区。</li>
+      <li>选内部扇区的理由一：<b class="kw">上电第一时刻就能读</b>——内存映射直接解引用，不用先初始化I²C/SPI，Bootloader越早知道走哪条路越好。</li>
+      <li>理由二：<b class="kw">和App天然共享</b>——Boot和App是两个独立工程，都要读写同一份标志，放双方都"看得见"的固定地址最内聚。</li>
+      <li>代价诚实说：内部Flash擦除粒度大（16KB整擦）、寿命1万次比EEPROM的100万次短——所以升级标志这种<b class="kw">低频写</b>的数据合适；高频记录（App大小统计）才放EEPROM。一句话：<b class="kw">按写频率和数据归属选存储介质</b>。</li>
+    </ul>
+  </div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">原码+反码双写是什么意思？为什么要这么干？</div></div>
+  <div class="green"><span class="bt">回答骨架：</span>
+    <ul>
+      <li>每个关键字段存两份：原码 + 按位取反的反码。读取时校验 <b class="kw">原码 XOR 反码 == 0xFFFFFFFF</b> 才算有效。</li>
+      <li>防两类事故：<b class="kw">写一半掉电</b>（只写出了原码，反码还是0xFF，校验必失败）和<b class="kw">位翻转/存储损坏</b>（随机错一位，双份同时错且保持互补的概率约 1/2^32）。</li>
+      <li>失败后的处理是<b class="kw">宁可信其无</b>：字段清零当作无效——状态机回落到路径D待机，宁可让用户多刷一次机，也绝不拿一个可疑的标志去擦Flash。</li>
+    </ul>
+  </div>
+  <div class="red"><span class="bt">死亡回答：</span>"为了防止数据出错"——没说出XOR校验方法、没说失败后的策略，等于没答。</div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">写标志写到一半掉电，系统会怎样？</div></div>
+  <div class="green"><span class="bt">回答骨架（这是全项目最值钱的问题，慢点答）：</span>
+    <ul>
+      <li>先说写入策略：标志<b class="kw">整个扇区只在RAM里改镜像</b>，改完一次性「整扇区擦除→逐字写回→读回比对」，<b class="kw">原子落盘</b>——不存在"改了A字段没改B字段"的中间态。</li>
+      <li>再讲时序设计：<b class="kw">先动数据、后置标志</b>。比如下载完成：先把密文全部落盘到外部Flash，最后一步才写"下载待更新"标志——中途任何时刻掉电，标志都没置上，Bootloader把这次下载当不存在，旧固件照常跑。</li>
+      <li>收尾总结：整个状态机的每条转换边都满足"标志未落盘=事情没发生"，所以<b class="kw">任何时刻掉电都有确定的恢复路径</b>。</li>
+    </ul>
+  </div>
+  <div class="blue"><span class="bt">为什么这样做：</span>掉电安全的本质不是"防掉电"（防不住），而是让每个中间状态都可解释、可恢复。这句话可以直接说给面试官。</div>
+</section>
+
+<!-- ============ LEVEL 4 ============ -->
+<section class="level panel" id="lv4">
+  <span class="level-tag">LEVEL 4</span>
+  <h2>Ymodem 与双线程传输</h2>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">Ymodem 协议大概是个什么流程？</div></div>
+  <div class="green"><span class="bt">回答骨架（讲三段就够）：</span>
+    <ul>
+      <li><b class="kw">握手</b>：接收方周期发'C'请求CRC模式；发送方回<b class="kw">首帧（文件名包）</b>——文件名+空格+文件大小，接收方从这里拿到<b class="kw">密文包总长</b>，据此算要擦哪些扇区。</li>
+      <li><b class="kw">数据流</b>：1024字节数据帧连续下发，每帧尾带<b class="kw">CRC16</b>；收对了回ACK，错了回NAK让发送方<b class="kw">重传这一帧</b>。</li>
+      <li><b class="kw">结束</b>：EOT→ACK→结束帧→ACK，收尾把总大小写进标志扇区置升级请求。</li>
+    </ul>
+  </div>
+  <div class="orange"><span class="bt">加分动作：</span>主动补一句"我做过Ymodem的<b>发送方向</b>，把App固件回传给上位机做过回读校验"——收发两侧都摸过的人极少，差异化立刻出来。</div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">串口接收为什么用DMA空闲中断？不用行不行？</div></div>
+  <div class="green"><span class="bt">回答骨架：</span>
+    <ul>
+      <li>三个候选：轮询（CPU空转，业务全停）、逐字节中断（115200bps下每87µs进一次中断，10KB固件就是几十万次中断，把业务线程活活打死）、<b class="kw">DMA+空闲中断</b>。</li>
+      <li>DMA空闲中断的机制：DMA在后台把字节搬进环形缓冲，<b class="kw">CPU完全不参与</b>；一帧数据发完总线空闲，硬件触发IDLE中断，CPU才一次性来处理整块。</li>
+      <li>效果：中断次数从"每字节一次"降到"每帧一次"，App业务线程几乎无感——这就是"无感升级"里"无感"两个字在传输层的落点。</li>
+    </ul>
+  </div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">为什么收包和写Flash要拆成两个线程？</div></div>
+  <div class="green"><span class="bt">回答骨架（必考，考的是RTOS素养）：</span>
+    <ul>
+      <li>矛盾点：<b class="kw">速率不匹配</b>——串口收一块是毫秒级，写外部Flash擦一个扇区是百毫秒级。单线程边收边写，收包缓冲必然溢出丢包。</li>
+      <li>解法：接收线程收满一块就<b class="kw">投进消息队列</b>立刻回去收下一块；落盘线程慢慢从队列取块写Flash。<b class="kw">队列深度=缓冲块数</b>，每块交出前先take掉占用，所以队列在逻辑上永远不满，溢出不可能发生。</li>
+      <li>这就是生产者-消费者模型：用空间换时间，把快收和慢写解耦。</li>
+    </ul>
+  </div>
+  <div class="red"><span class="bt">死亡回答：</span>"为了架构清晰"——没说出速率不匹配这个矛盾，等于白设计。追问"队列满了怎么办"时答"丢弃"也死——正确答案是我的设计里队列逻辑上不会满，同时启动阶段要先排空残留数据。</div>
+</section>
+
+<!-- ============ LEVEL 5 ============ -->
+<section class="level panel" id="lv5">
+  <span class="level-tag">LEVEL 5</span>
+  <h2>AES 加密与双层校验</h2>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">固件为什么要加密？整个校验体系是怎么分层的？</div></div>
+  <div class="green"><span class="bt">回答骨架（先分层再讲各自管什么）：</span>
+    <ul>
+      <li>加密的目的：固件是产品核心资产，串口明文传输等于裸奔；AES-256-CBC保证<b class="kw">被抓包也拿不到固件</b>。</li>
+      <li>校验分两层：<b class="kw">CRC16管帧级</b>——串口传输的随机误码，快，够用；<b class="kw">MD5管文件级</b>——整个固件对不对、有没有被篡改。</li>
+      <li>一句话总结分工：<b class="kw">CRC防"不小心坏"，MD5防"被人动过手脚"</b>，两层缺一不可。</li>
+    </ul>
+  </div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">MD5 怎么比？和谁比？为什么放包尾？</div></div>
+  <div class="green"><span class="bt">回答骨架：</span>
+    <ul>
+      <li>密文包格式：<b class="kw">16字节加密头 + 固件密文 + 16字节MD5指纹</b>（指纹是打包时对固件明文算好、明文附在包尾的）。</li>
+      <li>搬运时Bootloader<b class="kw">边解密边把明文喂给MD5</b>，搬完得到自己的指纹，和包尾预留的做memcmp。</li>
+      <li>放包尾三个理由：位置确定（总长-16一算就到）；搬完数据刚好读到，天然形成"收尾即比对"的时序；和数据连成一个完整文件，一次传输搞定。</li>
+      <li>最关键的认知：<b class="kw">这一次比对同时验证了三件事</b>——密文没坏、密钥正确、解密无误。任何一件出问题，解出来就是乱码，指纹必对不上（概率1-1/2^128）。</li>
+    </ul>
+  </div>
+  <div class="q"><span class="who">面试官</span><div class="qt">追问：AES密钥放在哪？会不会被抓包或者从固件里逆向出来？</div></div>
+  <div class="green"><span class="bt">回答（诚实+展示认知深度，这题答"藏得很好"必死）：</span>
+    <ul>
+      <li>现状诚实讲：密钥以数组形式内置在固件里，流程图设计的是<b class="kw">从加密芯片读取密钥</b>，我这版是软件模拟的占位实现。</li>
+      <li>然后展示思路：内置密钥挡得住抓包、挡不住逆向（bin里能搜出来）；生产级方案是密钥放<b class="kw">独立加密芯片或安全单元</b>，Flash里只存密文，攻击者拿到固件镜像也拿不到密钥。</li>
+      <li>收尾："所以架构上我把密钥获取抽成了独立一步，换真芯片只改密钥来源，流程不动。"——把缺陷讲成架构预留，这是最体面的答法。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ LEVEL 6 ============ -->
+<section class="level panel" id="lv6">
+  <span class="level-tag">LEVEL 6 · BOSS</span>
+  <h2>看门狗试用期与自动回滚（最亮的一张牌）</h2>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">你的方案里固件校验通过了就敢直接跑吗？怎么保证新固件本身没问题？</div></div>
+  <div class="green"><span class="bt">回答骨架（把试用期机制完整讲出来）：</span>
+    <ul>
+      <li>先点破认知：MD5通过只能证明"<b class="kw">搬运正确</b>"，不能证明"<b class="kw">固件能跑</b>"——代码里有bug照样让设备变砖。</li>
+      <li>所以中间插了一个"<b class="kw">试用期</b>"状态：搬运成功置"验证新App"，下次复位Bootloader开IWDG再跳转——<b class="kw">限时试跑</b>。</li>
+      <li>App自检通过（验向量表合法性）→ 置"备份"标志复位，Bootloader备份转正；App跑挂 → 没人喂狗，8.2秒后IWDG咬复位。</li>
+      <li>点睛：App自检失败的处理是<b class="kw">故意躺平不喂狗</b>——让看门狗来复位，把"固件坏了"翻译成"一次看门狗复位"。</li>
+    </ul>
+  </div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">复位之后 Bootloader 怎么知道"上次是固件跑挂了"而不是正常开机？</div></div>
+  <div class="green"><span class="bt">回答骨架（这是全项目最精妙的一环）：</span>
+    <ul>
+      <li>线索在<b class="kw">复位原因寄存器 RCC->CSR 的 IWDGRST 标志位</b>：看门狗复位后这个位会被硬件置1。</li>
+      <li>Bootloader上电第一件事读它：标志="验证新App" <b class="kw">且</b> IWDGRST=1 → 两个条件同时成立 = 新固件没活过试用期 → 不跳了，转回滚流程，从备份区恢复旧固件。</li>
+      <li>细节加分：读完必须<b class="kw">RCC_ClearFlag清掉</b>——这个位是写一清除，不清会一直残留，下次正常开机被误判成"又是狗咬的"。</li>
+      <li>总结句："新固件只有一次试用期机会，挂了就永久回滚——这就是升级失败不变砖的保证。"</li>
+    </ul>
+  </div>
+  <div class="red"><span class="bt">死亡回答：</span>"加个计数器记录失败次数"——放哪记？掉电丢不丢？多绕远路。复位原因寄存器是硬件白送的，用硬件方案永远优先于软件方案。</div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">IWDG 和 WWDG 有什么区别？为什么选 IWDG？</div></div>
+  <div class="green"><span class="bt">回答骨架：</span>
+    <ul>
+      <li>IWDG独立看门狗：<b class="kw">独立LSI时钟</b>（32kHz），主时钟崩了照样跑；超时了直接复位；一旦开启<b class="kw">关不掉</b>。</li>
+      <li>WWDG窗口看门狗：用PCLK，必须在时间窗口内喂（早喂晚喂都复位），能产生中断做临终处理。</li>
+      <li>选IWDG的理由：试用期要的是<b class="kw">"活不过时限就复位"的强保证</b>——App跑飞、死循环、时钟异常都要能兜住，IWDG独立时钟+不可关闭正合适；WWDG的窗口喂狗精细计时反而用不上，且系统时钟挂了它也跟着死。</li>
+      <li>参数张口就来：LSI 32kHz÷64分频÷重装0x0FFF≈8.2秒；App初始化+自检几秒内完成，够用。</li>
+    </ul>
+  </div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">逐个环节说：哪里掉电会出问题？</div></div>
+  <div class="green"><span class="bt">回答骨架（拿表格逐行过，显出系统性）：</span>
+    <table>
+      <tr><th>掉电时机</th><th>后果与恢复</th></tr>
+      <tr><td class="hl">下载中</td><td>标志未置，Boot当无事发生，旧App照常跑；外部Flash留半截密文，下次下载覆盖</td></tr>
+      <tr><td class="hl">搬运中</td><td>运行区被擦了但标志还是0x11 → 复位后重走子流程A，从外部Flash重新搬（源数据还在）</td></tr>
+      <tr><td class="hl">写标志中</td><td>原码+反码校验失败 → 当无效，回落路径D</td></tr>
+      <tr><td class="hl">试用期挂了</td><td>IWDG咬复位 → IWDGRST+0x22 → 回滚备份区旧固件</td></tr>
+      <tr><td class="hl">备份中</td><td>标志还是"备份中"未到0x44 → 复位重走备份（源在外部下载区，可重来）</td></tr>
+    </table>
+    <div style="margin-top:6px">收尾：所有路径的共同点是<b class="kw">"源数据在动数据之前永不破坏"</b>——外部下载区和备份区互相独立，运行区随便擦，都有地方重来。</div>
+  </div>
+</section>
+
+<!-- ============ LEVEL 7 ============ -->
+<section class="level panel" id="lv7">
+  <span class="level-tag">LEVEL 7</span>
+  <h2>高压追问与反问环节</h2>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">用户在升级过程中拔了电池呢？你测过吗？</div></div>
+  <div class="green"><span class="bt">回答：</span>上一页的掉电表格就是回答框架，但这题重点在<b class="kw">测试方法论</b>：真机上<b class="kw">掉电注入测试</b>——写个脚本在下载/搬运/写标志各阶段用继电器随机断电循环几百次，每次上电检查设备能否恢复到可用状态；再加<b class="kw">坏包注入</b>：手动改密文一个字节验证MD5拒绝、删反码字段验证标志失效、喂坏首帧验证Ymodem重传。"测过+怎么测的"远比"理论上没问题"值钱。</div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">这个方案有什么不足？重新设计你会改什么？</div></div>
+  <div class="green"><span class="bt">回答骨架（展示成长型思维，缺点要说真的）：</span>
+    <ul>
+      <li>密钥管理：内置数组 → 换加密芯片/安全单元（已在架构里预留接口）。</li>
+      <li>只防单次失败：<b class="kw">断点续传</b>没做，下载中断网要从头收——加断点记录（已收字节数落盘）可续传。</li>
+      <li>MD5防篡改够用但非密码学安全，高安全场景换 <b class="kw">SHA-256 + 签名验签（ECDSA）</b>，公钥放设备、私钥放服务器。</li>
+      <li>差分升级：全量包对低速信道太大，可上 bsdiff 差分包。</li>
+      <li>收尾："这些不足我都清楚，且每一项的改进方向和改造成本都评估过"——把开放题变成展示工程判断力的机会。</li>
+    </ul>
+  </div>
+
+  <div class="q"><span class="who">面试官</span><div class="qt">你有什么想问我的吗？</div></div>
+  <div class="green"><span class="bt">推荐反问（挑两个，展现技术视野）：</span>
+    <ul>
+      <li>"咱们产品的OTA是全量包还是有差分升级？设备端固件一般多大？"</li>
+      <li>"升级失败率有没有统计？线上有没有过批量变砖事故，最后怎么复盘的？"</li>
+      <li>"这个岗位入职后更多是维护现有Bootloader框架，还是有重构的机会？"</li>
+    </ul>
+  </div>
+  <div class="red"><span class="bt">踩坑：</span>问薪资加班（初面）、"没有问题"（显得没兴趣）、问"你们用什么芯片"（官网能查到的问题别问人）。</div>
+
+  <div class="blue" style="margin-top:16px"><span class="bt">七关通关清单（考前最后过一遍）：</span>
+    <ul>
+      <li>开场60秒：定位→链路→预埋两个亮点→角色</li>
+      <li>跳转五步：校验栈顶→喂狗→关外设中断→重映射VTOR→设MSP跳转</li>
+      <li>标志扇区：独立扇区、原码+反码XOR校验、RAM镜像原子落盘、先动数据后置标志</li>
+      <li>传输：Ymodem三段（握手/数据/结束）、DMA空闲中断、双线程队列解耦（速率不匹配）</li>
+      <li>校验：CRC防坏MD5防改、密文包三段格式、一次比对验三件事、密钥诚实答+架构预留</li>
+      <li>回滚：试用期机制、IWDGRST标志位、清标志、IWDG选型理由、掉电表格逐行背熟</li>
+      <li>高压题：掉电注入测试方法论、四个真实不足+改进方向、反问准备两个</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var links=document.querySelectorAll('#nav a');
+  var secs=[].map.call(links,function(a){return document.querySelector(a.getAttribute('href'))});
+  function sync(){
+    var y=window.scrollY+90,cur=0;
+    for(var i=0;i<secs.length;i++){if(secs[i]&&secs[i].offsetTop<=y)cur=i}
+    links.forEach(function(a,i){a.classList.toggle('active',i===cur)});
+  }
+  window.addEventListener('scroll',sync);sync();
+})();
+</script>
+</body>
+</html>

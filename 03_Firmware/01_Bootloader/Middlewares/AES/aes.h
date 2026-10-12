@@ -47,10 +47,10 @@ typedef enum {
 /*------------------------------------------------------------------------------
  * 当前配置：改这两行即可切换密钥长度和加密模式
  *
- * 注意：OTA 的密文是用 256 位密钥做的，这里必须跟着改成 256；
- *       改成 128 会让 Nk/Nr 对不上，解出来全是乱码（而且不报错）。
+ * 注意：OTA 的密文是用 128 位密钥做的，这里必须跟着改成 128；
+ *       密钥长度和打包工具不一致会让 Nk/Nr 对不上，解出来全是乱码（而且不报错）。
  *------------------------------------------------------------------------------*/
-#define AES_KEY_LENGTH          AES_KEY_LENGTH_256
+#define AES_KEY_LENGTH          AES_KEY_LENGTH_128
 #define AES_MODE                AES_MODE_CBC
 
 /*******************************************************************************
@@ -117,7 +117,7 @@ void AES_Decrypt(const unsigned char *pCipherText, unsigned char *pPlainText,
                  unsigned int nDataLen, const unsigned char *pIV);
 
 /*******************************************************************************
- * @function Aes_IV_256bit_Decode
+ * @function Aes_IV_128bit_Decode
  * @brief    带 IV 链值的单分组解密（OTA 搬运固件时逐块调用）
  *
  * AES_Decrypt 是"整段一次解完"的接口，而 OTA 搬运是每从 Flash 读 16 字节
@@ -130,7 +130,7 @@ void AES_Decrypt(const unsigned char *pCipherText, unsigned char *pPlainText,
  * @param[in,out] pData 指向一个分组的缓冲，长度必须是 AES_BLOCK_SIZE 字节。
  *                      进入时是密文，返回时替换为明文（原地解密）。
  * @param[in]     pKey  指向原始密钥的指针，长度 AES_KEY_LENGTH / 8 字节
- *                      （256 位即 32 字节）。首次调用时做密钥扩展。
+ *                      （128 位即 16 字节）。首次调用时做密钥扩展。
  *
  * @return 无返回值。
  *
@@ -139,7 +139,7 @@ void AES_Decrypt(const unsigned char *pCipherText, unsigned char *pPlainText,
  *       P = InvCipher(C) ^ IV 工作；改成 ECB 后 pIV 被忽略，链值前移无副作用，
  *       同一个函数照样能用。
  ******************************************************************************/
-void Aes_IV_256bit_Decode(unsigned char *pIV, unsigned char *pData,
+void Aes_IV_128bit_Decode(unsigned char *pIV, unsigned char *pData,
                           const unsigned char *pKey);
 
 #endif /* __AES_H */

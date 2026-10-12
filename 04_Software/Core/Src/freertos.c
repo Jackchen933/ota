@@ -26,6 +26,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "OtaApp.h"
+#include "OtaFlag.h"    /* OTA_IWDG_FEED: defaultTask 周期喂狗用 */
+#include "lvgl_task.h"  /* 022 屏幕界面：LVGL 主循环任务 */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -153,6 +155,11 @@ void MX_FREERTOS_Init(void) {
   {
     Error_Handler();
   }
+
+  /* ---- 022 屏幕界面移植：LVGL 主循环任务（业务零改动，只追加） ----
+     main.c 的 USER CODE 2 里已完成 lv_init/显示桥/触摸桥/建界面，
+     这里只负责启动循环任务（在 osKernelInitialize 之后，合法） */
+  lvgl_task_start();
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -178,6 +185,11 @@ void StartDefaultTask(void *argument)
   for(;;)
   {
     HAL_GPIO_TogglePin(Led_GPIO_Port, Led_Pin);
+
+    /* 接管 Boot 开的 IWDG(8.2s 超时, 关不掉): 每 500ms 喂一次,
+       即使本线程被高优先级任务抢占 ~7s 也不会被狗咬 */
+    OTA_IWDG_FEED();
+
     osDelay(500);
   }
   /* USER CODE END StartDefaultTask */

@@ -11,19 +11,21 @@
  *
  * @brief APP 侧「后台无感下载」OTA。
  *
- *        服务器从串口把固件推下来 -> APP 转存到外部 W25Q64 -> 全程不打断
+ *        服务器从串口把固件传下来 -> APP 转存到外部 W25Q64 -> 全程不打断
  *        正在跑的业务。下完之后在 EEPROM 里记下状态和大小，等用户按按键
  *        确认才软复位，由 Bootloader 从 W25Q64 搬到内部 Flash 的 A 区。
  *
  * Processing flow:
- *   WaitReqDownload --收到 0x11 0x22 0x33--> OtaDownload
- *   OtaDownload     --数据传完-------------> WaitReqUpdate
+ *   WaitReqDownload --收到 0x11 0x22 0x33--> OtaDownload(发'C'握手)
+ *   OtaDownload     --Ymodem 收完结束帧----> WaitReqUpdate
  *   WaitReqUpdate   --收到 0x77 0x88 0x99--> OtaEnd
  *   OtaEnd          --20 秒内按下按键------> 软复位进 Boot
  *
- * @note 本模块【替换】了原先基于 Ymodem 的方案（密文写内部 B 区 0x08020000）。
- *       两者都靠按键触发会互相打架，旧的 Ota.c/Ota.h 已移除。
+ * @note 传输层为标准 Ymodem(接收端)：任意终端工具(Tera Term/SecureCRT)
+ *       以 Ymodem 方式发送密文包文件即可，不需要专用推流上位机。
+ *       4 个 1024 字节数据帧凑满一块 4KB 才交给下载线程写 W25Q64。
  *
+ * @version V2.1  传输层由自定义推流改为标准 Ymodem
  * @version V2.0  改为 W25Q64 + EEPROM 状态机方案
  *
  * @note 1 tab == 4 spaces!
@@ -70,6 +72,22 @@ typedef enum
 
 #define OTA_CMD_LEN             3U      /* 命令一律 3 字节 */
 
+/* ---- Ymodem 协议(接收端) ----
+   帧格式: SOH/STX + seq + ~seq + 128/1024字节数据 + CRC16-XMODEM(2B)
+   握手:   MCU 发 'C' -> 对端发帧0(文件名+大小) -> MCU 回 ACK+'C' -> 数据帧...
+   结束:   EOT -> MCU 回 NAK -> 再收 EOT -> MCU 回 ACK+'C' -> 空文件名帧 -> ACK */
+#define YM_SOH                  0x01    /* 128 字节数据帧 */
+#define YM_STX                  0x02    /* 1024 字节数据帧 */
+#define YM_EOT                  0x04    /* 文件传输结束 */
+#define YM_ACK                  0x06
+#define YM_NAK                  0x15    /* 坏帧，请求重传 */
+#define YM_CAN                  0x18    /* 取消(连收两个生效) */
+#define YM_CRC_CH               0x43    /* 'C'：CRC 模式请求 */
+
+#define YM_BLK_128              128U
+#define YM_BLK_1024             1024U
+#define YM_C_MAX_RETRY          10U     /* 'C' 最大重发次数(每次间隔 END_IDLE_MS) */
+
 /* ---- 双缓冲 ----
    每块正好一个 W25Q 扇区(4096B)：收满一块就交给下载线程擦+写一个扇区，
    期间 OTA 线程接着收另一块，两边不打架。
@@ -80,17 +98,14 @@ typedef enum
 /* DMA 一次搬进来的块大小。比缓冲小，收到就转进流缓冲 */
 #define OTA_RX_CHUNK            1024U
 
-/* 流缓冲容量。服务器是连续推流的(不像 Ymodem 那样停等)，
-   所以要能吸收"下载线程正在写 Flash 时上游继续来的数据"。
-   W25Q64 写一个扇区约 130ms，115200 下这期间最多来 1.5KB，4KB 够用 */
+/* 流缓冲容量。吸收 DMA 波次、以及"BufTake 等下载线程写完 Flash"期间
+   到达的字节。Ymodem 停等协议下发送方在等 ACK 不会推数据，压力很小，
+   4KB 是余量设计 */
 #define OTA_STREAM_SIZE         4096U
 
 /* ---- 超时(ms) ----
-   FRAME_IDLE_MS: 一帧的判据。串口空闲这么久 = 服务器发完了一帧 */
-#define OTA_FRAME_IDLE_MS       100U
-/* END_IDLE_MS: 整个下载结束的判据。空闲这么久 = 服务器发完了全部固件。
-   比 FRAME_IDLE_MS 大得多，避免把帧间的小停顿误判成结束。
-   如果你的服务器有显式的结束命令，把这个超时机制换掉即可。 */
+   END_IDLE_MS: Ymodem 会话超时。握手段(还没收到帧0)空闲这么久就重发'C'；
+   收到帧0后空闲这么久 = 对端死了/线断了，中止本轮下载 */
 #define OTA_END_IDLE_MS         3000U
 
 /* 收到 0x77 0x88 0x99 后，留给用户按按键确认的时间 */

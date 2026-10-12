@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>双线程 Ymodem 流水线 · 精讲</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;border-radius:0!important}
+  body{
+    font-family:"Microsoft YaHei",sans-serif;font-size:17px;line-height:1.85;color:#222;
+    background:#8ed1ea;padding:24px 16px 80px;position:relative;
+  }
+  /* ---- 像素云 ---- */
+  .cloud{position:fixed;z-index:0;opacity:.9;pointer-events:none}
+  .cloud i{position:absolute;background:#fff;display:block;box-shadow:0 0 0 3px rgba(34,34,34,.06)}
+  .c1{top:60px;left:6%;animation:drift 26s ease-in-out infinite alternate}
+  .c2{top:180px;right:8%;animation:drift 32s ease-in-out infinite alternate-reverse}
+  .c3{top:520px;left:14%;animation:drift 38s ease-in-out infinite alternate}
+  @keyframes drift{from{transform:translateX(0)}to{transform:translateX(60px)}}
+  .wrap{max-width:960px;margin:0 auto;position:relative;z-index:1}
+
+  /* ---- 标题区 ---- */
+  .tag{display:inline-block;background:#222;color:#ffd93d;padding:6px 18px;letter-spacing:6px;font-weight:900;font-size:14px}
+  h1{font-size:44px;font-weight:900;margin:14px 0 6px;
+     text-shadow:3px 3px 0 #fffbea,6px 6px 0 #222}
+  .sub{font-weight:700;color:#222;opacity:.85;margin-bottom:22px}
+
+  /* ---- 吸顶HUD ---- */
+  .hud{position:sticky;top:8px;z-index:50;background:#fffbea;border:4px solid #222;
+       box-shadow:4px 4px 0 #222;display:flex;align-items:center;gap:18px;padding:10px 16px;margin-bottom:26px}
+  .hud .hp{display:flex;align-items:center;gap:6px;font-weight:900;font-size:13px;letter-spacing:2px}
+  .hud .exp{flex:1;display:flex;align-items:center;gap:8px}
+  .hud .exp .bar{flex:1;height:18px;background:#fff;border:3px solid #222;padding:2px}
+  .hud .exp .fill{height:100%;width:0;background:#3ec46d;transition:width .6s steps(6)}
+  .hud .exp .lbl{font-weight:900;font-size:13px;letter-spacing:2px}
+  .hud .coin{display:flex;align-items:center;gap:8px;font-weight:900;font-size:15px}
+  .hud .coin .c{width:18px;height:18px;background:#ffd93d;border:3px solid #222}
+  .hud .coin.bump .num{animation:bump .4s steps(2)}
+  @keyframes bump{50%{transform:translateY(-5px)}}
+
+  /* ---- 吉祥物 ---- */
+  .mascot{display:flex;align-items:flex-end;gap:18px;margin:6px 0 26px}
+  .dog{animation:hop 1.2s steps(2) infinite}
+  @keyframes hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+  .rpg{background:#fff;border:3px solid #222;box-shadow:4px 4px 0 #222;padding:12px 16px;
+       font-weight:700;position:relative;min-width:280px}
+  .rpg::after{content:"▼";position:absolute;right:10px;bottom:4px;font-size:12px;
+       animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ---- 任务卡 ---- */
+  .quest{background:#ffe3e3;border:4px solid #222;box-shadow:4px 4px 0 #222;padding:16px 20px;margin-bottom:30px}
+  .quest .qtag{display:inline-block;background:#e84c3d;color:#fff;font-weight:900;letter-spacing:3px;
+       padding:3px 12px;font-size:13px;border:3px solid #222;margin-bottom:10px}
+  .quest .qbox{background:#fff;border:3px solid #222;padding:10px 14px;font-weight:700}
+
+  /* ---- 关卡面板 ---- */
+  .level{margin-bottom:30px}
+  .level-head{display:flex;align-items:center;gap:14px;padding:16px 20px;cursor:pointer;user-select:none}
+  .level-tag{background:#ffd93d;border:3px solid #222;box-shadow:3px 3px 0 #222;
+       font-weight:900;padding:2px 14px;font-size:15px;letter-spacing:1px;white-space:nowrap}
+  .level-head h3{font-size:21px;font-weight:900;flex:1}
+  .arrow{font-size:15px;transition:transform .3s steps(3)}
+  .level.open .arrow{transform:rotate(90deg)}
+  .level-body{max-height:0;overflow:hidden;transition:max-height .8s;padding:0 22px}
+  .level.open .level-body{max-height:14000px;padding-bottom:24px}
+
+  /* ---- 信息盒 ---- */
+  .box{border:3px solid #222;box-shadow:3px 3px 0 #222;padding:14px 18px;margin:16px 0}
+  .box h4{font-size:16px;font-weight:900;margin-bottom:8px;letter-spacing:1px}
+  .blue{background:#e8f6ff}.blue h4{color:#1a6fc4}
+  .green{background:#e4fbe4}.green h4{color:#1e8a4c}
+  .red{background:#ffe3e3}.red h4{color:#c0392b}
+  .yellow{background:#fff3c4}.yellow h4{color:#a67c00}
+  .purple{background:#f1eaff}.purple h4{color:#7b4fd0}
+
+  ul.blt{list-style:none;margin:6px 0}
+  ul.blt li{padding-left:22px;position:relative;margin:5px 0}
+  ul.blt li::before{content:"▪";color:#e0a300;font-weight:900;position:absolute;left:2px}
+
+  .formula{background:#fff;border:4px solid #222;box-shadow:5px 5px 0 #222;text-align:center;
+       padding:16px;margin:16px 0;font-family:Consolas,monospace;font-weight:900;font-size:18px}
+  .formula small{display:block;font-family:"Microsoft YaHei";font-weight:700;font-size:13px;color:#555;margin-top:6px}
+
+  table.px{border-collapse:collapse;width:100%;margin:14px 0;background:#fff}
+  table.px th{background:#222;color:#ffd93d;padding:8px 10px;font-size:15px;border:3px solid #222}
+  table.px td{border:3px solid #222;padding:8px 10px;font-size:15px}
+  table.px tr:nth-child(even) td{background:#f4f4f4}
+  table.px td.hl{background:#ffd93d;font-weight:900}
+  table.px td.g{background:#e4fbe4;font-weight:700}
+  table.px td.r{background:#ffe3e3;font-weight:700}
+
+  figure.fig{background:#fff;border:4px solid #222;box-shadow:6px 6px 0 #222;padding:14px;margin:18px 0}
+  figure.fig figcaption{font-size:13px;color:#666;margin-top:8px;text-align:center;font-weight:700}
+  svg{shape-rendering:crispEdges;display:block;margin:0 auto;max-width:100%}
+
+  code{background:#fff3c4;border:2px solid #222;padding:1px 6px;font-family:Consolas,monospace;
+       font-size:14.5px;font-weight:700}
+  .codeblk{background:#222;color:#e8f6ff;font-family:Consolas,monospace;font-size:14px;line-height:1.7;
+       border:4px solid #222;box-shadow:5px 5px 0 rgba(34,34,34,.25);padding:14px 18px;overflow-x:auto;margin:14px 0;white-space:pre}
+  .codeblk .cm{color:#8fb8d8}.codeblk .kw{color:#ffd93d}.codeblk .fn{color:#7ee787}
+
+  /* ---- BOSS ---- */
+  .boss{background:#ffe3e3;border:4px solid #222;box-shadow:6px 6px 0 rgba(34,34,34,.2);padding:20px 24px;margin-bottom:30px}
+  .boss .btag{display:inline-block;background:#e84c3d;color:#fff;font-weight:900;letter-spacing:3px;
+       padding:4px 14px;border:3px solid #222;margin-bottom:12px}
+  .boss ol{margin-left:24px}
+  .boss li{margin:10px 0;font-weight:700}
+  .boss li b{color:#c0392b}
+  .boss .ok{color:#1e8a4c}
+
+  /* ---- STAGE CLEAR ---- */
+  .clear{background:#ffd93d;border:4px solid #222;box-shadow:8px 8px 0 rgba(34,34,34,.2);
+       padding:26px 28px;text-align:center;margin-bottom:30px}
+  .clear .ct{font-size:30px;font-weight:900;letter-spacing:6px;text-shadow:3px 3px 0 #fff}
+  .clear .trophy{font-size:42px;margin:8px 0}
+  .clear .list{background:#fff;border:4px solid #222;box-shadow:4px 4px 0 #222;text-align:left;
+       padding:18px 24px;margin-top:14px}
+  .clear .list ol{margin-left:22px}
+  .clear .list li{margin:7px 0;font-weight:700;font-size:15.5px}
+
+  .foot{text-align:center;color:#222;font-weight:700;opacity:.75;font-size:14px;margin-top:10px}
+</style>
+</head>
+<body>
+
+<div class="cloud c1"><i style="width:90px;height:26px;left:0;top:18px"></i><i style="width:34px;height:34px;left:16px;top:0"></i><i style="width:26px;height:26px;left:46px;top:6px"></i></div>
+<div class="cloud c2"><i style="width:110px;height:30px;left:0;top:22px"></i><i style="width:40px;height:40px;left:22px;top:0"></i><i style="width:30px;height:30px;left:58px;top:8px"></i></div>
+<div class="cloud c3"><i style="width:76px;height:22px;left:0;top:14px"></i><i style="width:28px;height:28px;left:12px;top:0"></i></div>
+
+<div class="wrap">
+
+  <div class="tag">OTA · DUAL-THREAD PIPELINE</div>
+  <h1>双线程流水线</h1>
+  <div class="sub">—— Ymodem 停等版 · 从"为什么"到"每一行" ——</div>
+
+  <div class="hud">
+    <div class="hp">
+      HP
+      <svg width="66" height="18" viewBox="0 0 66 18">
+        <g>
+          <rect x="0"  y="3" width="6" height="6" fill="#e84c3d"/><rect x="6"  y="0" width="6" height="6" fill="#e84c3d"/><rect x="12" y="3" width="6" height="6" fill="#e84c3d"/>
+          <rect x="6"  y="9" width="6" height="6" fill="#e84c3d"/><rect x="12" y="6" width="6" height="9" fill="#e84c3d"/>
+          <rect x="24" y="3" width="6" height="6" fill="#e84c3d"/><rect x="30" y="0" width="6" height="6" fill="#e84c3d"/><rect x="36" y="3" width="6" height="6" fill="#e84c3d"/>
+          <rect x="30" y="9" width="6" height="6" fill="#e84c3d"/><rect x="36" y="6" width="6" height="9" fill="#e84c3d"/>
+          <rect x="48" y="3" width="6" height="6" fill="#e84c3d"/><rect x="54" y="0" width="6" height="6" fill="#e84c3d"/><rect x="60" y="3" width="6" height="6" fill="#e84c3d"/>
+          <rect x="54" y="9" width="6" height="6" fill="#e84c3d"/><rect x="60" y="6" width="6" height="9" fill="#e84c3d"/>
+        </g>
+      </svg>
+    </div>
+    <div class="exp">
+      <span class="lbl">EXP</span>
+      <div class="bar"><div class="fill" id="expbar"></div></div>
+    </div>
+    <div class="coin" id="coinbox"><span class="c"></span><span class="num" id="coinnum">0</span></div>
+  </div>
+
+  <div class="mascot">
+    <svg class="dog" width="86" height="72" viewBox="0 0 86 72">
+      <g shape-rendering="crispEdges">
+        <rect x="8"  y="0"  width="14" height="14" fill="#222"/>
+        <rect x="50" y="0"  width="14" height="14" fill="#222"/>
+        <rect x="10" y="14" width="52" height="34" fill="#fff" stroke="#222" stroke-width="3"/>
+        <rect x="20" y="24" width="8"  height="8"  fill="#222"/>
+        <rect x="44" y="24" width="8"  height="8"  fill="#222"/>
+        <rect x="30" y="34" width="12" height="8"  fill="#222"/>
+        <rect x="32" y="42" width="8"  height="6"  fill="#e84c3d"/>
+        <rect x="14" y="48" width="44" height="12" fill="#fff" stroke="#222" stroke-width="3"/>
+        <rect x="0"  y="26" width="10" height="22" fill="#222"/>
+        <rect x="62" y="26" width="10" height="22" fill="#222"/>
+      </g>
+    </svg>
+    <div class="rpg">YO！今天的副本是「双线程流水线」。<br>带上 357ms 和 130ms 这两把钥匙，出发！</div>
+  </div>
+
+  <div class="quest">
+    <span class="qtag">QUEST</span>
+    <div class="qbox">"接收 1KB 约 90ms，收 4KB 就要 357ms；可擦除+写 4KB 也要 130ms。
+    双线程到底是怎么把这两个时间凑到一起的？具体每一步在干什么？"</div>
+  </div>
+
+  <!-- ============ LEVEL 1 ============ -->
+  <section class="level panel" id="lv1">
+    <h3 class="level-head"><span class="level-tag">LEVEL 1</span> 先算账：单线程为什么必死 <span class="arrow">▶</span></h3>
+    <div class="level-body">
+      <div class="box blue">
+        <h4>■ 两个数字摆上台面</h4>
+        <ul class="blt">
+          <li><b>串口 115200</b>：约 11.5KB/s → 收 4KB 要 <b>357ms</b></li>
+          <li><b>W25Q64 擦+写 4KB</b>（一个扇区）：擦 ~45ms + 页写 ~84ms ≈ <b>130ms</b></li>
+        </ul>
+        <p>看上去 130 &lt; 357，"写比收快"，好像没事？错——关键在于这两件事<b>能不能同时干</b>。</p>
+      </div>
+      <div class="formula">
+        单线程：357ms(收) + 130ms(写) = 487ms / 4KB
+        <small>而数据每 357ms 就到一批 —— 每块亏 130ms，只进不出</small>
+      </div>
+      <div class="box red">
+        <h4>■ 单线程的死亡螺旋</h4>
+        <p>收完 4KB → 停下来擦写 130ms → 这 130ms 里串口又到了约 1.4KB → 先攒流缓冲。
+        下一块再亏 130ms……<b>流缓冲 4096B 迟早溢出，丢字节 → 固件损坏</b>。
+        就算改用 Ymodem 停等（发送方等 ACK 自动不推数据）不死机，每块也要白白多花 130ms——串口在写 Flash 时干等着。</p>
+      </div>
+      <div class="box green">
+        <h4>■ 中间结论</h4>
+        <p><b>收包和落盘是两台节奏不同的机器，必须让它们并行：OTA 线程专职收，下载线程专职写。</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LEVEL 2 ============ -->
+  <section class="level panel" id="lv2">
+    <h3 class="level-head"><span class="level-tag">LEVEL 2</span> 双线程分工：两张工位图 <span class="arrow">▶</span></h3>
+    <div class="level-body">
+      <p>对应 <code>OtaApp.c</code>：OTA 线程 = <code>OtaApp_Task</code>，下载线程 = <code>OtaApp_DownloadTask</code>。</p>
+      <figure class="fig">
+        <svg width="860" height="360" viewBox="0 0 860 360">
+          <!-- 串口通道 -->
+          <rect x="10" y="150" width="120" height="60" fill="#ffd93d" stroke="#222" stroke-width="3"/>
+          <text x="70" y="176" text-anchor="middle" font-size="14" font-weight="900">串口+DMA</text>
+          <text x="70" y="196" text-anchor="middle" font-size="12">s_rx_chunk</text>
+          <line x1="130" y1="180" x2="190" y2="180" stroke="#222" stroke-width="3"/>
+          <polygon points="190,174 200,180 190,186" fill="#222"/>
+          <text x="160" y="168" text-anchor="middle" font-size="11" font-weight="700">IDLE中断</text>
+          <!-- 流缓冲 -->
+          <rect x="200" y="150" width="110" height="60" fill="#e8f6ff" stroke="#222" stroke-width="3"/>
+          <text x="255" y="176" text-anchor="middle" font-size="13" font-weight="900">流缓冲</text>
+          <text x="255" y="196" text-anchor="middle" font-size="12">4096B</text>
+          <!-- OTA线程框 -->
+          <rect x="20" y="20" width="560" height="100" fill="none" stroke="#1a6fc4" stroke-width="3" stroke-dasharray="8 5"/>
+          <text x="34" y="44" font-size="14" font-weight="900" fill="#1a6fc4">OTA 线程（生产者 · 优先级高）</text>
+          <rect x="330" y="150" width="120" height="60" fill="#e4fbe4" stroke="#222" stroke-width="3"/>
+          <text x="390" y="172" text-anchor="middle" font-size="13" font-weight="900">Ymodem凑帧</text>
+          <text x="390" y="192" text-anchor="middle" font-size="11">CRC过→落缓冲</text>
+          <!-- 4KB缓冲 -->
+          <rect x="470" y="150" width="110" height="60" fill="#e4fbe4" stroke="#222" stroke-width="3"/>
+          <text x="525" y="172" text-anchor="middle" font-size="13" font-weight="900">4KB缓冲×2</text>
+          <text x="525" y="192" text-anchor="middle" font-size="11">s_buf[2][4096]</text>
+          <!-- 队列 -->
+          <rect x="620" y="150" width="90" height="60" fill="#ffd93d" stroke="#222" stroke-width="3"/>
+          <text x="665" y="176" text-anchor="middle" font-size="13" font-weight="900">满块队列</text>
+          <text x="665" y="196" text-anchor="middle" font-size="11">传指针!</text>
+          <!-- 下载线程框 -->
+          <rect x="280" y="240" width="560" height="100" fill="none" stroke="#e67e22" stroke-width="3" stroke-dasharray="8 5"/>
+          <text x="294" y="264" font-size="14" font-weight="900" fill="#e67e22">下载线程（消费者 · 优先级低）</text>
+          <rect x="730" y="150" width="110" height="60" fill="#ffe3e3" stroke="#222" stroke-width="3"/>
+          <text x="785" y="172" text-anchor="middle" font-size="13" font-weight="900">W25Q64</text>
+          <text x="785" y="192" text-anchor="middle" font-size="11">擦45+写84ms</text>
+          <!-- 箭头 -->
+          <line x1="310" y1="180" x2="328" y2="180" stroke="#222" stroke-width="3"/>
+          <line x1="450" y1="180" x2="468" y2="180" stroke="#222" stroke-width="3"/>
+          <line x1="580" y1="180" x2="618" y2="180" stroke="#222" stroke-width="3"/>
+          <polygon points="618,174 628,180 618,186" fill="#222"/>
+          <line x1="710" y1="180" x2="728" y2="180" stroke="#222" stroke-width="3"/>
+          <polygon points="728,174 738,180 728,186" fill="#222"/>
+          <!-- 回还信号量 -->
+          <path d="M 785 212 C 785 260 660 250 665 248" stroke="#e67e22" stroke-width="3" fill="none" stroke-dasharray="6 4"/>
+          <text x="740" y="252" font-size="11" font-weight="700" fill="#e67e22">写完→还信号量</text>
+          <!-- OTA线程5步 -->
+          <text x="40" y="70" font-size="12">① 流缓冲取字节(20ms超时) ② 逐字节喂Ymodem子状态机</text>
+          <text x="40" y="90" font-size="12">③ 帧CRC过→memcpy进4KB缓冲(必要时等信号量) ④ 满4KB→队列 ⑤ 切另一块继续收</text>
+          <!-- 下载线程3步 -->
+          <text x="300" y="290" font-size="12">① 队列取满块(没有就睡,不占CPU) ② 跨扇区先擦→页写 ③ 无论成败都还信号量</text>
+          <text x="300" y="312" font-size="12">写失败: 置s_wr_error → OTA线程中止本轮(不报正响应,服务器可重传)</text>
+        </svg>
+        <figcaption>数据流向：串口→DMA→流缓冲→OTA线程→4KB缓冲→队列→下载线程→W25Q64；虚线回程=信号量归还</figcaption>
+      </figure>
+      <div class="box blue">
+        <h4>■ 为什么 OTA 线程优先级高、下载线程低？</h4>
+        <p>收包有实时性（DMA 波次 + IDLE 中断要求及时搬走），而写 Flash 是"慢工活"，晚一点无所谓。
+        让快的等慢的可以，让慢的堵快的不行。</p>
+      </div>
+
+      <h4 style="font-size:19px;font-weight:900;margin:22px 0 4px">▸ 七个工位逐个拆开看</h4>
+
+      <div class="box yellow">
+        <h4>工位① 串口 + DMA（硬件自动，CPU 零参与）</h4>
+        <ul class="blt">
+          <li>串口每收到 1 字节，DMA 自动搬进 <code>s_rx_chunk[1024]</code>——不进中断、不打扰任何线程</li>
+          <li><b>为什么是 1024？</b>正好一个 STX 数据帧的长度。停等协议下回完 ACK 对端才发下一帧，所以一波 DMA 基本装下完整一帧（帧总长 1029 = 头5+数据1024）</li>
+          <li>这一步没有任何软件参与——你写代码时可以当它"不存在"</li>
+        </ul>
+      </div>
+
+      <div class="box yellow">
+        <h4>工位② IDLE 空闲中断（第一程软件搬运）</h4>
+        <ul class="blt">
+          <li>触发条件：<b>总线静默超过 1 字节时间</b>（115200 下 87µs）。注意它只认"安静"，不认"帧尾"——只是停等协议恰好让一帧发完后线就安静了，所以效果上等于帧尾中断</li>
+          <li>进 <code>OtaApp_OnRxEvent</code>（ISR 上下文）只做两件事：把刚到的 len 字节从 s_rx_chunk <b>拷进流缓冲</b> → <b>重挂 DMA</b> 等下一波</li>
+          <li>ISR 铁律：只拷贝不处理、不阻塞、不调任何带超时的 API。喂帧的事交给 OTA 线程</li>
+        </ul>
+      </div>
+
+      <div class="box yellow">
+        <h4>工位③ 流缓冲 4096B（节奏缓冲带）</h4>
+        <ul class="blt">
+          <li>作用：把<b>中断的波次节奏</b>（一波 1029B，随时可能到）和<b>任务的消费节奏</b>（OTA 线程每轮最多取 128B）解耦</li>
+          <li>ISR 侧 <code>xStreamBufferSendFromISR</code> 写入，OTA 线程 <code>xStreamBufferReceive</code> 读出——一写一读天然线程安全，无需自己加锁</li>
+          <li>停等协议下压力极小（发送方等 ACK 不推数据），4096 是余量设计；满时 ISR 丢弃新数据，坏帧会被 CRC 抓住重传</li>
+        </ul>
+      </div>
+
+      <div class="box yellow">
+        <h4>工位④ OTA 线程凑帧（Ymodem 子状态机）</h4>
+        <ul class="blt">
+          <li><code>xStreamBufferReceive</code> 带 <b>20ms 超时</b>——超时返回 0 字节，正好轮去做空闲检查（这个超时既是取数粒度也是看门）</li>
+          <li>取到的每个字节喂 <code>Ota_YmFeed(b)</code>，六状态推进：HEAD→SEQ→SEQC→DATA（边收边算CRC）→CRC_HI→CRC_LO</li>
+          <li>CRC 低字节一到 → <code>Ota_YmFrameDone</code> 整帧裁决：过 → 落缓冲；不过 → NAK 重传，<b>4KB 缓冲毫发无损</b>（帧数据一直只待在独立的 s_ym_frame 里）</li>
+        </ul>
+      </div>
+
+      <div class="box yellow">
+        <h4>工位⑤ 4KB 缓冲 ×2（所有权交接核心）</h4>
+        <ul class="blt">
+          <li><code>Ota_YmToBuf</code>：当前缓冲是空的（s_cur_len==0）→ 先 <code>Ota_BufTake</code> 拿"空闲"信号量（<b>唯一可能阻塞的点，稳态只等 41ms</b>）→ memcpy 1024B 进去</li>
+          <li>攒满 4096 → <code>Ota_BufCommit</code>：往队列塞 16 字节消息 {指针, len, id, <b>session 轮次号</b>} → 切另一块继续收</li>
+          <li><b>session 是防串轮的</b>：每进一次下载 s_session++。下载线程收到消息发现轮次号变了 → 写指针归零从头写。没有它，第二轮会接着上一轮的半截位置往下写，把 A 区写花</li>
+        </ul>
+      </div>
+
+      <div class="box yellow">
+        <h4>工位⑥ 满块队列（交接窗口）</h4>
+        <ul class="blt">
+          <li>深度 = 2 = 缓冲块数。每块交出去之前一定先 take 过信号量 → 队列里最多同时躺着 2 块 → <b>put 永远不阻塞，这是设计出来的数学保证</b></li>
+          <li>下载线程 <code>osMessageQueueGet(..., portMAX_DELAY)</code>：取不到就睡，<b>零 CPU 占用</b>，来一块醒一次</li>
+        </ul>
+      </div>
+
+      <div class="box yellow">
+        <h4>工位⑦ 下载线程擦写 W25Q64</h4>
+        <ul class="blt">
+          <li>取块 → 按写指针算覆盖哪些 4KB 扇区 → <b>跨扇区边界先擦</b>（擦过的扇区记下来不重擦）→ 按 256B/页连续写</li>
+          <li>写完（<b>无论成败</b>）→ release 信号量把缓冲还回去。失败不还 = OTA 线程永远卡死在 BufTake，整条流水线停摆——所以 release 必须无条件执行</li>
+          <li>写失败 → 置 <code>s_wr_error</code> → OTA 线程在喂帧间隙发现 → 中止本轮、不发正响应 → 服务器可以重传整包</li>
+        </ul>
+      </div>
+
+      <figure class="fig">
+        <svg width="860" height="250" viewBox="0 0 860 250">
+          <text x="20" y="26" font-size="14" font-weight="900">一块 4KB 缓冲的一生（buf0 为例）</text>
+          <!-- 状态带 -->
+          <rect x="20"  y="40" width="110" height="40" fill="#e4fbe4" stroke="#222" stroke-width="3"/>
+          <rect x="150" y="40" width="150" height="40" fill="#ffd93d" stroke="#222" stroke-width="3"/>
+          <rect x="320" y="40" width="130" height="40" fill="#e8f6ff" stroke="#222" stroke-width="3"/>
+          <rect x="470" y="40" width="160" height="40" fill="#ffe3e3" stroke="#222" stroke-width="3"/>
+          <rect x="650" y="40" width="110" height="40" fill="#e4fbe4" stroke="#222" stroke-width="3"/>
+          <text x="75"  y="64" text-anchor="middle" font-size="13" font-weight="900">空闲</text>
+          <text x="225" y="58" text-anchor="middle" font-size="13" font-weight="900">OTA线程填充中</text>
+          <text x="225" y="74" text-anchor="middle" font-size="10">take信号量→收4帧×memcpy</text>
+          <text x="385" y="58" text-anchor="middle" font-size="13" font-weight="900">队列排队</text>
+          <text x="385" y="74" text-anchor="middle" font-size="10">commit: 16B消息{指针,session}</text>
+          <text x="550" y="58" text-anchor="middle" font-size="13" font-weight="900">下载线程写入W25Q64</text>
+          <text x="550" y="74" text-anchor="middle" font-size="10">先擦后写~130ms</text>
+          <text x="705" y="58" text-anchor="middle" font-size="13" font-weight="900">空闲(还了)</text>
+          <text x="705" y="74" text-anchor="middle" font-size="10">release信号量</text>
+          <line x1="130" y1="60" x2="148" y2="60" stroke="#222" stroke-width="3"/><polygon points="148,55 158,60 148,65" fill="#222"/>
+          <line x1="300" y1="60" x2="318" y2="60" stroke="#222" stroke-width="3"/><polygon points="318,55 328,60 318,65" fill="#222"/>
+          <line x1="450" y1="60" x2="468" y2="60" stroke="#222" stroke-width="3"/><polygon points="468,55 478,60 468,65" fill="#222"/>
+          <line x1="630" y1="60" x2="648" y2="60" stroke="#222" stroke-width="3"/><polygon points="648,55 658,60 648,65" fill="#222"/>
+          <!-- 所有权标注 -->
+          <rect x="150" y="96" width="300" height="30" fill="none" stroke="#1a6fc4" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="300" y="116" text-anchor="middle" font-size="12" font-weight="700" fill="#1a6fc4">所有权：OTA线程（信号量被它握着）</text>
+          <rect x="470" y="96" width="160" height="30" fill="none" stroke="#e67e22" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="550" y="116" text-anchor="middle" font-size="12" font-weight="700" fill="#e67e22">所有权：下载线程</text>
+          <!-- 双缓冲并行 -->
+          <text x="20" y="165" font-size="14" font-weight="900">同一时刻两块缓冲状态互补：</text>
+          <rect x="20" y="178" width="330" height="24" fill="#ffd93d" stroke="#222" stroke-width="2"/>
+          <text x="185" y="195" text-anchor="middle" font-size="12" font-weight="700">buf0：OTA线程正在填帧5~8</text>
+          <rect x="380" y="178" width="330" height="24" fill="#ffe3e3" stroke="#222" stroke-width="2"/>
+          <text x="545" y="195" text-anchor="middle" font-size="12" font-weight="700">buf1：下载线程正在写W25Q64</text>
+          <text x="20" y="232" font-size="12">任何时刻每块缓冲恰好属于一个人（信号量=所有权凭证），这就是"拷贝不共享"策略的全部秘密</text>
+        </svg>
+        <figcaption>一块缓冲的完整生命周期：空闲→填充→排队→写入→还回空闲。buf0 和 buf1 相位互补，永不相撞</figcaption>
+      </figure>
+
+      <table class="px">
+        <tr><th>出错场景</th><th>在哪被抓住</th><th>处理动作</th><th>缓冲/数据受损？</th></tr>
+        <tr><td>传输误码（CRC 不对）</td><td>Ota_YmFrameDone</td><td>NAK → 对端重传本帧</td><td class="g">否（帧缓冲隔离）</td></tr>
+        <tr><td>序号跳号/错乱</td><td>seq 比较</td><td>CAN CAN 中止本轮</td><td class="g">否（坏帧没进缓冲）</td></tr>
+        <tr><td>写 W25Q64 失败</td><td>下载线程</td><td>置 s_wr_error → OTA线程中止、不发正响应</td><td class="r">本轮作废，可重传</td></tr>
+        <tr><td>对端中途死亡</td><td>3s 空闲检查</td><td>CAN 挂断 → 清EEPROM → 回等待态</td><td class="g">已落盘部分无害（没置0x11）</td></tr>
+        <tr><td>30 秒无人下载</td><td>'C' 重发计数</td><td>静默退出回等待态</td><td class="g">否</td></tr>
+        <tr><td>中途掉电</td><td>下次上电 Boot</td><td>标志仍是 0x11 但数据不全 → 包长互验/MD5 拦截</td><td class="g">A 区作废可重刷</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ LEVEL 3 ============ -->
+  <section class="level panel" id="lv3">
+    <h3 class="level-head"><span class="level-tag">LEVEL 3</span> 同步三件套：每件回答一个问题 <span class="arrow">▶</span></h3>
+    <div class="level-body">
+      <table class="px">
+        <tr><th>工具</th><th>回答的问题</th><th>所有权（谁动它）</th></tr>
+        <tr><td class="hl">空闲信号量 ×2</td><td>"这块 4KB 缓冲现在归谁？"</td><td>OTA线程 acquire→填；下载线程写完 release。开局各给一次=两块都空闲</td></tr>
+        <tr><td class="hl">满块队列</td><td>"填好的块交给谁？"</td><td>只传 16B 的 {指针,len,id,session}，<b>拷指针不拷数据</b></td></tr>
+        <tr><td class="hl">流缓冲 4096B</td><td>"中断来的字节放哪等任务取？"</td><td>IDLE中断从ISR侧拷入，OTA线程取出</td></tr>
+      </table>
+      <div class="box blue">
+        <h4>■ 为什么队列传指针不传 4KB 数据？</h4>
+        <p>队列拷贝按消息大小来。传 4KB = 每块多 4KB 内存搬运还多 4KB 队列存储；
+        传指针 = 16 字节搞定，缓冲本体由信号量保护，<b>一块内存只有一个人在写</b>。
+        这就是"拷贝不共享"策略：共享的只是"这块现在归你"这个所有权凭证。</p>
+      </div>
+      <div class="codeblk"><span class="cm">/* 队列深度 = 缓冲块数 = 2 —— 数学上不可能满 */</span>
+s_frame_q = osMessageQueueNew(<span class="kw">OTA_BUF_COUNT</span>, <span class="kw">sizeof</span>(OtaFrame_t), ...);
+
+<span class="cm">/* 交出前一定先 take 过信号量 → 队列里每块都对应一次take */</span>
+<span class="cm">/* 所以 put 永远不会因队满而阻塞，这是设计出来的不变量 */</span></div>
+      <div class="box green">
+        <h4>■ 中间结论</h4>
+        <p><b>信号量管所有权，队列管交接，流缓冲管中断与任务的节奏差——三件套各管一段，谁也不越权。</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LEVEL 4 ============ -->
+  <section class="level panel" id="lv4">
+    <h3 class="level-head"><span class="level-tag">LEVEL 4</span> 时间线：130ms 只露出 41ms <span class="arrow">▶</span></h3>
+    <div class="level-body">
+      <p>Ymodem 是停等协议：MCU 每收完一帧 CRC 校验通过、数据落进 4KB 缓冲后才回 ACK，发送方收到 ACK 才发下一帧。
+      一帧 1024B 传输约 <b>89ms</b>，4 帧凑一块 4KB。</p>
+      <figure class="fig">
+        <svg width="860" height="300" viewBox="0 0 860 300">
+          <!-- 时间轴刻度 -->
+          <text x="20" y="24" font-size="13" font-weight="900">OTA线程</text>
+          <rect x="20" y="32" width="120" height="22" fill="#e4fbe4" stroke="#222" stroke-width="2"/>
+          <rect x="140" y="32" width="120" height="22" fill="#e4fbe4" stroke="#222" stroke-width="2"/>
+          <rect x="260" y="32" width="120" height="22" fill="#e4fbe4" stroke="#222" stroke-width="2"/>
+          <rect x="380" y="32" width="120" height="22" fill="#e4fbe4" stroke="#222" stroke-width="2"/>
+          <rect x="500" y="32" width="56" height="22" fill="#ffd93d" stroke="#222" stroke-width="2"/>
+          <rect x="556" y="32" width="120" height="22" fill="#e4fbe4" stroke="#222" stroke-width="2"/>
+          <text x="80"  y="47" text-anchor="middle" font-size="11">收帧1 89ms</text>
+          <text x="200" y="47" text-anchor="middle" font-size="11">收帧2 89ms</text>
+          <text x="320" y="47" text-anchor="middle" font-size="11">收帧3 89ms</text>
+          <text x="440" y="47" text-anchor="middle" font-size="11">收帧4 89ms</text>
+          <text x="528" y="47" text-anchor="middle" font-size="10" font-weight="900">等41ms</text>
+          <text x="616" y="47" text-anchor="middle" font-size="11">收帧5 89ms</text>
+
+          <text x="20" y="84" font-size="13" font-weight="900">下载线程</text>
+          <rect x="380" y="92" width="176" height="22" fill="#ffe3e3" stroke="#222" stroke-width="2"/>
+          <rect x="556" y="92" width="176" height="22" fill="#ffe3e3" stroke="#222" stroke-width="2"/>
+          <text x="468" y="107" text-anchor="middle" font-size="11">写块A 130ms</text>
+          <text x="644" y="107" text-anchor="middle" font-size="11">写块B 130ms</text>
+
+          <text x="20" y="144" font-size="13" font-weight="900">发送方(PC)</text>
+          <rect x="20"  y="152" width="120" height="22" fill="#e8f6ff" stroke="#222" stroke-width="2"/>
+          <rect x="140" y="152" width="120" height="22" fill="#e8f6ff" stroke="#222" stroke-width="2"/>
+          <rect x="260" y="152" width="120" height="22" fill="#e8f6ff" stroke="#222" stroke-width="2"/>
+          <rect x="380" y="152" width="120" height="22" fill="#e8f6ff" stroke="#222" stroke-width="2"/>
+          <rect x="556" y="152" width="120" height="22" fill="#e8f6ff" stroke="#222" stroke-width="2"/>
+          <text x="80"  y="167" text-anchor="middle" font-size="10">帧1→等ACK</text>
+          <text x="200" y="167" text-anchor="middle" font-size="10">帧2→等ACK</text>
+          <text x="320" y="167" text-anchor="middle" font-size="10">帧3→等ACK</text>
+          <text x="440" y="167" text-anchor="middle" font-size="10">帧4→等ACK</text>
+          <text x="616" y="167" text-anchor="middle" font-size="10">帧5→等ACK</text>
+
+          <!-- 对齐虚线 -->
+          <line x1="380" y1="28" x2="380" y2="180" stroke="#e67e22" stroke-width="2" stroke-dasharray="5 4"/>
+          <line x1="500" y1="28" x2="500" y2="180" stroke="#e67e22" stroke-width="2" stroke-dasharray="5 4"/>
+          <line x1="556" y1="28" x2="556" y2="180" stroke="#e67e22" stroke-width="2" stroke-dasharray="5 4"/>
+          <text x="384" y="196" font-size="11" font-weight="700" fill="#e67e22">帧4落缓冲→commit块A→块A开写</text>
+          <text x="560" y="196" font-size="11" font-weight="700" fill="#e67e22">帧5传完89ms,块A还剩41ms</text>
+
+          <text x="20" y="240" font-size="14" font-weight="900">关键推导：</text>
+          <text x="20" y="262" font-size="13">帧5传输的 89ms 里，下载线程正在写块A → 写掉 89ms，只剩 130-89 = 41ms</text>
+          <text x="20" y="284" font-size="13">OTA线程在帧5的CRC校验通过后等信号量，最多等 41ms —— 双缓冲的价值就在这</text>
+        </svg>
+        <figcaption>稳态周期：每块 4×89 + 41 ≈ 397ms。黄色 41ms 是 130ms 写块时间唯一"露出来"的部分</figcaption>
+      </figure>
+      <div class="formula">
+        单缓冲：356 + 130 = 486ms/块 &nbsp;&nbsp;→&nbsp;&nbsp; 双缓冲：356 + 41 ≈ 397ms/块
+        <small>双缓冲把"完整等 130ms"压缩成"只等差值 41ms"；推流版则能 100% 藏掉(357&gt;130)</small>
+      </div>
+      <div class="box blue">
+        <h4>■ 为什么停等版不怕 BufTake 阻塞堆数据？</h4>
+        <p>推流版里 OTA 线程阻塞 130ms，串口还在推 → 靠流缓冲硬扛。
+        停等版里 <b>ACK 就是阀门</b>：OTA 线程不回 ACK，发送方就停在那里——数据根本不会来。
+        之前的"背压三级闸"在停等协议下收敛成一句话：<b>ACK 时机即流控</b>。</p>
+      </div>
+      <div class="box purple">
+        <h4>■ 验证卡：两条路复核 41ms</h4>
+        <p><b>路线A(画图)</b>：帧5在 t=356~445 传输；块A在 t=356 开写、t=486 写完 → 帧5收完时剩 486-445 = 41ms。
+        <b>路线B(公式)</b>：露头时间 = 写块时间 − 一帧传输时间 = 130 − 89 = 41ms。两路一致 ✓</p>
+      </div>
+
+      <h4 style="font-size:19px;font-weight:900;margin:22px 0 4px">▸ 逐帧明细账（稳态一块 4KB）</h4>
+      <table class="px">
+        <tr><th>时刻</th><th>OTA线程</th><th>下载线程</th><th>发送方(PC)</th></tr>
+        <tr><td class="hl">t=0~89</td><td>收帧1：CRC过→BufTake(空,立即拿到)→memcpy→<b>ACK</b></td><td>睡觉</td><td>发帧1 → 等ACK</td></tr>
+        <tr><td class="hl">t=89~178</td><td>收帧2：memcpy(不take,缓冲没满)→ACK</td><td>睡觉</td><td>发帧2 → 等ACK</td></tr>
+        <tr><td class="hl">t=178~267</td><td>收帧3：memcpy→ACK</td><td>睡觉</td><td>发帧3 → 等ACK</td></tr>
+        <tr><td class="hl">t=267~356</td><td>收帧4：memcpy→满4096→commit→切块→ACK</td><td class="r">t=356 醒：取到块A，开始擦写</td><td>发帧4 → 等ACK</td></tr>
+        <tr><td class="hl">t=356~445</td><td>收帧5：CRC过→BufTake(<b>阻塞等块0信号量</b>)</td><td>写块A中(已写89ms)</td><td>发帧5 → <b>等ACK(干等,串口闲)</b></td></tr>
+        <tr><td class="hl">t=445~486</td><td class="r">还差 41ms 信号量才到手</td><td>继续写(剩41ms)</td><td>还在等帧5的ACK</td></tr>
+        <tr><td class="hl">t=486</td><td>拿到信号量→memcpy帧5→ACK</td><td class="g">块A写完→release→睡</td><td>收到ACK→发帧6</td></tr>
+        <tr><td colspan="4" class="hl">稳态周期 = 4×89 + 41 ≈ 397ms/块；波特率降到 76800 以下(一帧≥135ms)时，帧传输能盖住整个 130ms 写块，41ms 归零</td></tr>
+      </table>
+      <div class="box green">
+        <h4>■ 中间结论</h4>
+        <p><b>停等版的 41ms 等待，本质是"帧传输(89ms)追不上写块(130ms)"的差值：130−89=41。</b>波特率越高、一帧传得越快、差值越大——921600 下会涨到 119ms，那时瓶颈就真正变成 Flash；而流水线的妙处是：无论差值多大，缓冲信号量自动让 OTA 线程等在 BufTake，不用改一行代码。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LEVEL 5 ============ -->
+  <section class="level panel" id="lv5">
+    <h3 class="level-head"><span class="level-tag">LEVEL 5</span> Ymodem 版的四个新设计 <span class="arrow">▶</span></h3>
+    <div class="level-body">
+      <table class="px">
+        <tr><th>设计</th><th>针对的问题</th><th>做法</th></tr>
+        <tr><td class="hl">独立帧缓冲<br>s_ym_frame[1024]</td><td class="r">坏帧污染 4KB 缓冲</td><td>帧数据先攒这里、边收边算CRC；<b>CRC通过才 memcpy</b> 进 4KB 块。NAK 重传不产生回滚</td></tr>
+        <tr><td class="hl">ACK 门槛=落RAM缓冲</td><td class="r">ACK了但数据丢了</td><td>Ota_YmToBuf 返回后才 ACK。落盘安全另由"全部落盘才置0x11"的commit point兜底</td></tr>
+        <tr><td class="hl">重复序号重ACK不重填</td><td class="r">上个ACK丢了→对端重发</td><td>seq == expected-1 → 只重发ACK；seq == expected → 正常填</td></tr>
+        <tr><td class="hl">EaSize用帧0文件大小</td><td class="r">0x1A填充污染包长</td><td>Ymodem把文件填充到1024整数倍；s_total含填充，会让Boot的包长互验(cipher_len==16+body+16)失败</td></tr>
+      </table>
+      <div class="codeblk"><span class="cm">/* Ota_ConsumeByte 的 DOWNLOAD 态现在只有一行 */</span>
+<span class="kw">case</span> OTA_ST_DOWNLOAD: Ota_YmFeed(b); <span class="kw">break</span>;
+
+<span class="cm">/* 子状态机: HEAD→SEQ→SEQC→DATA(边收边算CRC)→CRC_HI→CRC_LO */</span>
+<span class="cm">/* 收满一帧 → Ota_YmFrameDone(crc_rx): */</span>
+  crc错  → NAK(缓冲没被碰，重传无副作用)
+  seq==0 → 帧0(文件名+大小) 或 空文件名结束帧→FinishDownload
+  seq==expected      → YmToBuf落缓冲 → ACK
+  seq==expected-1    → 重ACK不重填
+  其他(跳号)         → CAN CAN 中止本轮</div>
+      <div class="box green">
+        <h4>■ 中间结论</h4>
+        <p><b>传输层(CRC+停等)管"坏帧当场重传"，文件层(MD5)管"整包一致性"——两层防线，坏帧不过夜，坏包不转正。</b></p>
+      </div>
+      <div class="box yellow">
+        <h4>■ 会话超时也换班了</h4>
+        <p>老版 3 秒空闲 = "推流结束"；新版 3 秒空闲 = 异常：握手段没等到帧0 → 重发 'C'（最多10次）；
+        收到帧0后空闲 → 对端死了，发 CAN 挂断中止。正常停等节奏是毫秒级，3 秒静默绝不正常。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BOSS ============ -->
+  <section class="boss">
+    <span class="btag">⚠ BOSS战警告</span>
+    <ol>
+      <li><b>坑1：CRC 还没算完就发 ACK。</b><span class="ok">正解：CRC过 → 落RAM缓冲 → 才ACK。顺序错一步，Flash 里全是垃圾还以为传好了。</span></li>
+      <li><b>坑2：把重复序号当新帧再填一遍。</b><span class="ok">正解：seq==expected-1 是"上个ACK丢了"的对端重传，重 ACK 即可，填了数据就错位。</span></li>
+      <li><b>坑3：收到第一个 EOT 就 FinishDownload。</b><span class="ok">正解：标准双EOT握手——第一次回NAK，第二次回ACK+'C'要结束帧。回错对方一直重发EOT，两边卡死。</span></li>
+      <li><b>坑4：EaSize 直接写 s_total。</b><span class="ok">正解：Ymodem 0x1A 填充会混进字节数，Boot 的 cipher_len==16+body_len+16 互验必挂。用帧0里的文件大小。</span></li>
+      <li><b>坑5：下载线程写失败不还信号量。</b><span class="ok">正解：无论成败都必须 release——不还的话 OTA 线程永远卡死在 Ota_BufTake，整条流水线停摆。</span></li>
+    </ol>
+  </section>
+
+  <!-- ============ STAGE CLEAR ============ -->
+  <section class="clear">
+    <div class="ct">— STAGE CLEAR —</div>
+    <div class="trophy">🏆</div>
+    <div class="list">
+      <ol>
+        <li>单线程 487ms/块 &gt; 357ms 到达率 → 必须双线程；收包与落盘解耦</li>
+        <li>OTA 线程(高优先级)管收：流缓冲→Ymodem子状态机→CRC过落4KB缓冲→满块进队列</li>
+        <li>下载线程(低优先级)管写：队列取块→跨扇区先擦→页写→无论成败还信号量</li>
+        <li>同步三件套：空闲信号量管所有权、队列传指针管交接、流缓冲管中断节奏差</li>
+        <li>队列深度=缓冲块数=2 → 数学上不会满，put 不阻塞是设计出来的不变量</li>
+        <li>停等版稳态：4×89+41≈397ms/块；双缓冲把 130ms 写块等待压成 41ms 差值</li>
+        <li>停等协议下 ACK 本身就是流控阀——不回 ACK 发送方自动停，无需背压机制</li>
+        <li>坏帧走 NAK 当场重传(帧缓冲隔离)，坏包走 MD5 拒绝转正——两层防线各管一段</li>
+      </ol>
+    </div>
+  </section>
+
+  <div class="mascot">
+    <svg class="dog" width="86" height="72" viewBox="0 0 86 72">
+      <g shape-rendering="crispEdges">
+        <rect x="8"  y="0"  width="14" height="14" fill="#222"/>
+        <rect x="50" y="0"  width="14" height="14" fill="#222"/>
+        <rect x="10" y="14" width="52" height="34" fill="#fff" stroke="#222" stroke-width="3"/>
+        <rect x="20" y="24" width="8"  height="8"  fill="#222"/>
+        <rect x="44" y="24" width="8"  height="8"  fill="#222"/>
+        <rect x="30" y="34" width="12" height="8"  fill="#222"/>
+        <rect x="32" y="42" width="8"  height="6"  fill="#e84c3d"/>
+        <rect x="14" y="48" width="44" height="12" fill="#fff" stroke="#222" stroke-width="3"/>
+        <rect x="0"  y="26" width="10" height="22" fill="#222"/>
+        <rect x="62" y="26" width="10" height="22" fill="#222"/>
+      </g>
+    </svg>
+    <div class="rpg">通关！记住那句台词：<br>"收是我的事，写是你的事，信号量是交接棒。" 🐾</div>
+  </div>
+
+  <div class="foot">OTA 双线程 Ymodem 流水线 · 精讲完 · 对应 OtaApp.c V2.1</div>
+</div>
+
+<script>
+(function(){
+  var levels = document.querySelectorAll('.level');
+  var expbar = document.getElementById('expbar');
+  var coinnum = document.getElementById('coinnum');
+  var coinbox = document.getElementById('coinbox');
+  var done = 0;
+
+  function openLevel(i){
+    if(i >= levels.length) return;
+    levels[i].classList.add('open');
+    done++;
+    expbar.style.width = (done * 100 / levels.length) + '%';
+    coinnum.textContent = done;
+    coinbox.classList.remove('bump');
+    void coinbox.offsetWidth;
+    coinbox.classList.add('bump');
+    setTimeout(function(){ openLevel(i+1); }, 900);
+  }
+  setTimeout(function(){ openLevel(0); }, 600);
+
+  levels.forEach(function(lv){
+    var head = lv.querySelector('.level-head');
+    head.addEventListener('click', function(){
+      lv.classList.toggle('open');
+    });
+  });
+})();
+</script>
+</body>
+</html>

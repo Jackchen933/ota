@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRC 与 MD5 逐步拆解 · 像素闯关</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    font-family:"Microsoft YaHei",sans-serif;
+    background:#8ed1ea;
+    color:#222;
+    font-size:17px;
+    line-height:1.85;
+  }
+  /* ---------- 像素云 ---------- */
+  .cloud{position:fixed;z-index:0;opacity:.85;}
+  .cloud i{position:absolute;background:#fff;display:block;}
+  .cloud i:nth-child(1){width:26px;height:26px;top:0;left:20px;}
+  .cloud i:nth-child(2){width:40px;height:40px;top:14px;left:0;}
+  .cloud i:nth-child(3){width:40px;height:40px;top:14px;left:30px;}
+  .cloud i:nth-child(4){width:26px;height:26px;top:28px;left:56px;}
+  .cloud i:nth-child(5){width:60px;height:18px;top:36px;left:10px;}
+  @keyframes drift1{0%,100%{transform:translateX(0);}50%{transform:translateX(40px);}}
+  @keyframes drift2{0%,100%{transform:translateX(0);}50%{transform:translateX(-30px);}}
+
+  .wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:30px 26px 80px;}
+
+  /* ---------- 标题区 ---------- */
+  .tag{
+    display:inline-block;background:#222;color:#ffd93d;
+    padding:6px 18px;letter-spacing:6px;font-weight:900;font-size:14px;
+    border:4px solid #222;box-shadow:4px 4px 0 rgba(34,34,34,.25);
+  }
+  h1{
+    font-size:42px;font-weight:900;margin:18px 0 8px;
+    text-shadow:3px 3px 0 #fffbea,6px 6px 0 #222;line-height:1.3;
+  }
+  .sub{font-weight:700;color:#1a4b66;margin-bottom:30px;}
+
+  /* ---------- HUD ---------- */
+  .hud{
+    position:sticky;top:8px;z-index:50;
+    display:flex;align-items:center;gap:18px;
+    background:#fffbea;border:4px solid #222;
+    box-shadow:4px 4px 0 #222;
+    padding:10px 18px;margin-bottom:26px;
+  }
+  .hud .hearts{display:flex;align-items:center;gap:6px;font-weight:900;}
+  .hud .expwrap{flex:1;display:flex;align-items:center;gap:10px;}
+  .hud .explabel{font-weight:900;font-size:13px;}
+  .hud .expbar{
+    flex:1;height:22px;background:#fff;border:3px solid #222;
+  }
+  .hud .expbar>div{
+    height:100%;width:0%;background:#3ec46d;
+    transition:width .6s steps(6);
+  }
+  .hud .coins{display:flex;align-items:center;gap:8px;font-weight:900;}
+  .hud .coin{
+    width:22px;height:22px;background:#ffd93d;border:3px solid #222;
+    display:inline-block;
+  }
+
+  /* ---------- 吉祥物 ---------- */
+  .mascot-row{display:flex;align-items:flex-start;gap:16px;margin:26px 0;}
+  .dog{shape-rendering:crispEdges;animation:hop 1.2s steps(2) infinite;flex:none;}
+  @keyframes hop{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
+  .rpg{
+    position:relative;background:#fff;border:3px solid #222;
+    box-shadow:4px 4px 0 #222;padding:12px 16px;font-weight:700;max-width:640px;
+  }
+  .rpg::after{
+    content:"▼";position:absolute;right:10px;bottom:4px;
+    animation:blink 1s steps(1) infinite;color:#222;
+  }
+  @keyframes blink{0%,49%{opacity:1;}50%,100%{opacity:0;}}
+
+  /* ---------- QUEST ---------- */
+  .quest{
+    background:#ffe3e3;border:4px solid #222;box-shadow:5px 5px 0 #222;
+    padding:16px 20px;margin:24px 0 30px;
+  }
+  .quest .qtag{
+    display:inline-block;background:#e84c3d;color:#fff;
+    padding:4px 14px;font-weight:900;letter-spacing:3px;
+    border:3px solid #222;margin-bottom:10px;
+  }
+  .quest .qtext{
+    background:#fff;border:3px solid #222;padding:10px 14px;font-weight:700;
+  }
+
+  /* ---------- 面板（像素八角边框） ---------- */
+  .panel{
+    background:#fffbea;
+    border:4px solid #222;
+    box-shadow:0 -4px 0 0 #222, 0 4px 0 0 #222, -4px 0 0 0 #222, 4px 0 0 0 #222,
+               8px 8px 0 rgba(34,34,34,.2);
+    padding:0 0 22px;margin:0 0 40px;
+  }
+  .level-head{
+    display:flex;align-items:center;gap:14px;
+    padding:18px 20px;cursor:pointer;user-select:none;
+  }
+  .level-tag{
+    background:#ffd93d;border:3px solid #222;box-shadow:3px 3px 0 #222;
+    padding:3px 12px;font-weight:900;font-size:14px;letter-spacing:2px;flex:none;
+  }
+  .level-head h2{font-size:23px;font-weight:900;flex:1;}
+  .arrow{
+    font-size:18px;font-weight:900;transition:transform .35s steps(4);
+    color:#e0a300;flex:none;
+  }
+  .level.open .arrow{transform:rotate(90deg);}
+  .level-body{max-height:0;overflow:hidden;transition:max-height .8s;}
+  .level.open .level-body{max-height:20000px;}
+  .level-body>div{padding:6px 24px 0;}
+
+  h3{
+    font-size:19px;font-weight:900;margin:22px 0 10px;
+    padding-left:12px;border-left:8px solid #ffd93d;
+  }
+  p{margin:8px 0;}
+  b{color:#1a4b66;}
+  strong{color:#c0392b;}
+
+  ul{list-style:none;margin:8px 0;}
+  ul li{padding-left:22px;position:relative;margin:7px 0;}
+  ul li::before{content:"▪";position:absolute;left:2px;color:#e0a300;font-weight:900;}
+
+  code,.mono{
+    font-family:Consolas,"Courier New",monospace;
+    background:#f4f4f4;border:2px solid #222;padding:1px 7px;font-size:15px;font-weight:700;
+  }
+  .codeblock{
+    font-family:Consolas,"Courier New",monospace;
+    background:#222;color:#ffd93d;
+    padding:14px 18px;margin:12px 0;
+    border:4px solid #222;box-shadow:5px 5px 0 rgba(34,34,34,.25);
+    font-size:14.5px;line-height:1.7;overflow-x:auto;
+  }
+
+  /* 信息盒 */
+  .why{background:#e8f6ff;border:3px solid #222;padding:12px 16px;margin:14px 0;}
+  .why .t{font-weight:900;color:#1a6fc4;}
+  .ok{background:#e4fbe4;border:3px solid #222;padding:12px 16px;margin:14px 0;}
+  .ok .t{font-weight:900;color:#1e8a4c;}
+  .warn{background:#ffe3e3;border:3px solid #222;padding:12px 16px;margin:14px 0;}
+  .warn .t{font-weight:900;color:#c0392b;}
+  .purple{background:#f1eaff;border:3px solid #222;padding:12px 16px;margin:14px 0;}
+  .purple .t{font-weight:900;color:#7b4fd0;}
+
+  .formula{
+    background:#fff;border:4px solid #222;box-shadow:5px 5px 0 #222;
+    text-align:center;padding:16px 14px;margin:16px 0;
+    font-family:Consolas,monospace;font-size:19px;font-weight:900;
+  }
+
+  /* 像素表格 */
+  table{border-collapse:collapse;width:100%;margin:14px 0;background:#fff;}
+  th{
+    background:#222;color:#ffd93d;padding:9px 10px;
+    border:3px solid #222;font-size:15px;
+  }
+  td{border:3px solid #222;padding:8px 10px;font-size:15px;}
+  tr:nth-child(even) td{background:#f4f4f4;}
+  td.hl{background:#ffd93d;font-weight:900;}
+
+  figure{
+    background:#fff;border:4px solid #222;box-shadow:6px 6px 0 #222;
+    padding:14px;margin:16px 0;overflow-x:auto;
+  }
+  figcaption{font-size:13px;color:#555;font-weight:700;margin-top:8px;text-align:center;}
+
+  /* BOSS */
+  .boss{background:#ffe3e3;}
+  .boss .level-tag{background:#e84c3d;color:#fff;}
+  .pit{background:#fff;border:3px solid #222;padding:10px 14px;margin:10px 0;}
+  .pit .bad{font-weight:900;color:#c0392b;}
+  .pit .good{font-weight:900;color:#1e8a4c;}
+
+  /* STAGE CLEAR */
+  .clear{
+    background:#ffd93d;text-align:center;
+  }
+  .clear .level-tag{background:#fff;}
+  .clear .list{
+    background:#fffbea;border:4px solid #222;box-shadow:4px 4px 0 #222;
+    text-align:left;padding:18px 26px;margin:16px auto;max-width:760px;
+  }
+  .clear ol li{margin:8px 0;padding-left:6px;}
+  .clear ol{padding-left:30px;margin:6px 0;}
+  .clear ol li::before{content:none;}
+  .clear .arrow{display:none;}
+</style>
+</head>
+<body>
+
+<div class="cloud" style="top:8%;left:6%;animation:drift1 9s ease-in-out infinite;"><i></i><i></i><i></i><i></i><i></i></div>
+<div class="cloud" style="top:22%;right:8%;animation:drift2 11s ease-in-out infinite;"><i></i><i></i><i></i><i></i><i></i></div>
+<div class="cloud" style="top:55%;left:3%;animation:drift2 13s ease-in-out infinite;"><i></i><i></i><i></i><i></i><i></i></div>
+<div class="cloud" style="top:75%;right:5%;animation:drift1 10s ease-in-out infinite;"><i></i><i></i><i></i><i></i><i></i></div>
+
+<div class="wrap">
+
+  <div style="text-align:center;">
+    <span class="tag">DATA CHECK · 两件套</span>
+    <h1>CRC 与 MD5<br>逐步拆解</h1>
+    <div class="sub">已知 AES 的每一步 · 现在把 CRC 和 MD5 也拆到每一行</div>
+  </div>
+
+  <!-- HUD -->
+  <div class="hud">
+    <span class="hearts">
+      <svg width="24" height="22" viewBox="0 0 12 11" shape-rendering="crispEdges"><rect x="1" y="1" width="4" height="4" fill="#e84c3d"/><rect x="7" y="1" width="4" height="4" fill="#e84c3d"/><rect x="0" y="2" width="12" height="4" fill="#e84c3d"/><rect x="1" y="6" width="10" height="2" fill="#e84c3d"/><rect x="3" y="8" width="6" height="2" fill="#e84c3d"/><rect x="5" y="10" width="2" height="1" fill="#e84c3d"/></svg>
+      HP
+    </span>
+    <span class="expwrap">
+      <span class="explabel">EXP</span>
+      <span class="expbar"><div id="expbar"></div></span>
+    </span>
+    <span class="coins"><span class="coin"></span><span id="coinNum">0</span></span>
+  </div>
+
+  <!-- 吉祥物 -->
+  <div class="mascot-row">
+    <svg class="dog" width="96" height="72" viewBox="0 0 24 18">
+      <rect x="16" y="0" width="4" height="4" fill="#222"/>
+      <rect x="20" y="0" width="4" height="4" fill="#222"/>
+      <rect x="14" y="4" width="10" height="8" fill="#fff"/>
+      <rect x="13" y="4" width="1" height="8" fill="#222"/>
+      <rect x="24" y="4" width="1" height="8" fill="#222"/>
+      <rect x="14" y="12" width="10" height="1" fill="#222"/>
+      <rect x="15" y="6" width="2" height="2" fill="#222"/>
+      <rect x="21" y="6" width="2" height="2" fill="#222"/>
+      <rect x="18" y="8" width="2" height="2" fill="#222"/>
+      <rect x="18" y="10" width="3" height="2" fill="#e84c3d"/>
+      <rect x="2" y="6" width="12" height="8" fill="#fff"/>
+      <rect x="1" y="5" width="14" height="1" fill="#222"/>
+      <rect x="1" y="14" width="14" height="1" fill="#222"/>
+      <rect x="0" y="6" width="1" height="8" fill="#222"/>
+      <rect x="0" y="2" width="2" height="4" fill="#222"/>
+      <rect x="3" y="15" width="3" height="2" fill="#222"/>
+      <rect x="10" y="15" width="3" height="2" fill="#222"/>
+    </svg>
+    <div class="rpg">你已通关 AES 的每一步。今天再拆两个：CRC 和 MD5——一个管帧，一个管整包。拆完它们，你三层校验就没黑盒了！</div>
+  </div>
+
+  <!-- QUEST -->
+  <div class="quest">
+    <span class="qtag">QUEST</span>
+    <div class="qtext">讲清 CRC16 与 MD5 的<b>每一步具体操作</b>：输入怎么进来、中间怎么算、结果怎么比对——全部对应到 OTA 项目里的真实用法。</div>
+  </div>
+
+  <!-- ============ LEVEL 1 ============ -->
+  <section class="level panel" id="lv1">
+    <h3 class="level-head" onclick="toggle(this)">
+      <span class="level-tag">LEVEL 1</span>
+      <h2>CRC 是什么：给一帧数据算个"余数"</h2>
+      <span class="arrow">▶</span>
+    </h3>
+    <div class="level-body"><div>
+
+      <p><b>CRC（循环冗余校验）的本质</b>：把整帧数据看成一个巨大的二进制数，用一个约定的"除数"去做除法，把<b>余数</b>当作校验值附在数据后面。接收方拿数据再除一遍，余数对不上就是传坏了。</p>
+
+      <h3>你的项目里它长什么样</h3>
+      <p>Ymodem 数据帧的尾部两个字节就是 CRC16：</p>
+      <div class="codeblock">┌──────┬──────┬────────┬──────────────────┬─────────┐
+│ SOH/ │ 帧号 │ 帧号反码│   数据 128/1024B  │ CRC16   │
+│ STX  │ seq  │ 255-seq│  ← CRC 只算这一段 → │ 高+低   │
+└──────┴──────┴────────┴──────────────────┴─────────┘
+  0x01     1B      1B                          2B
+  0x02</div>
+
+      <div class="why">
+        <div class="t">■ 为什么用 CRC 不用普通"校验和"（把字节加起来）？</div>
+        <p>校验和太弱：两个字节同时坏、恰好互相抵消（+3 和 -3），校验和不变，错误就漏过去了。CRC 做的是<b>多项式除法</b>，对连续多位翻转（突发错误）的检测能力是数学证明过的——16 位 CRC 能保证检测出所有长度 ≤16 位的突发错误。传输线上最常见的恰恰就是连片误码。</p>
+      </div>
+
+      <h3>你用的具体品种：CRC16-CCITT（XMODEM 变体）</h3>
+      <table>
+        <tr><th>参数</th><th>值</th><th>含义</th></tr>
+        <tr><td>生成多项式 G</td><td class="hl">0x1021</td><td>x¹⁶+x¹²+x⁵+1，做除法的"除数"（有效位17位：0x11021）</td></tr>
+        <tr><td>初始值</td><td class="hl">0x0000</td><td>余数寄存器从 0 开始（注意：不是所有 CRC 变体都是 0）</td></tr>
+        <tr><td>输入/输出反射</td><td>否</td><td>按字节高位在先处理，不搞位序翻转</td></tr>
+        <tr><td>结果异或</td><td>0x0000</td><td>算完直接用，不再异或</td></tr>
+      </table>
+
+      <div class="warn">
+        <div class="t">⚠ 品种不同 = 结果完全不同</div>
+        <p>同一个数据，CRC16/XMODEM、CRC16/MODBUS、CRC-CCITT(FALSE) 算出来的值<b>互不相同</b>——差异全在"初值 / 是否反射位序 / 结果是否异或"这三件配置上。Ymodem 协议用的是 <strong>XMODEM 变体</strong>，上位机和设备两端必须配同一品种，否则每帧都校验失败。</p>
+      </div>
+
+      <div class="ok">
+        <div class="t">■ 中间结果</div>
+        <p>CRC 的核心操作只有一个：<b>左移一位，顶出来了就异或多项式</b>。全部字节滚完，寄存器里剩下的 16 位就是 CRC 值，高字节在前放进帧尾。</p>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ LEVEL 2 ============ -->
+  <section class="level panel" id="lv2">
+    <h3 class="level-head" onclick="toggle(this)">
+      <span class="level-tag">LEVEL 2</span>
+      <h2>CRC 逐位手算：8 步滚完一个字节</h2>
+      <span class="arrow">▶</span>
+    </h3>
+    <div class="level-body"><div>
+
+      <p>用最小例子完整走一遍：数据 1 个字节 <code>0x31</code>（ASCII 的 '1'），多项式 0x1021，初始值 0x0000。</p>
+
+      <h3>代码只有 5 行</h3>
+      <div class="codeblock">uint16_t crc16_xmodem(const uint8_t *d, uint32_t len)
+{
+    uint16_t crc = 0x0000;                 /* 1. 余数寄存器清零 */
+    while (len--) {
+        crc ^= (uint16_t)(*d++) << 8;      /* 2. 字节放进寄存器高8位 */
+        for (int i = 0; i &lt; 8; i++) {      /* 3. 一个字节滚8次 */
+            if (crc &amp; 0x8000)              /* 4. 顶出来的是1 → 异或多项式 */
+                crc = (crc &lt;&lt; 1) ^ 0x1021;
+            else                           /*    顶出来的是0 → 只左移 */
+                crc &lt;= 1;
+        }
+    }
+    return crc;                            /* 5. 剩下的16位就是CRC */
+}</div>
+
+      <h3>0x31 的 8 步滚动手账</h3>
+      <p>第 2 步后寄存器 = <code>0x3100</code>（0x31 抬到高 8 位）。接下来滚 8 轮，每一轮只看<b>最高位</b>：</p>
+      <table>
+        <tr><th>轮</th><th>寄存器进</th><th>最高位</th><th>操作</th><th>寄存器出</th></tr>
+        <tr><td>1</td><td>0x3100</td><td>0</td><td>左移</td><td>0x6200</td></tr>
+        <tr><td>2</td><td>0x6200</td><td>0</td><td>左移</td><td>0xC400</td></tr>
+        <tr><td>3</td><td>0xC400</td><td class="hl">1</td><td>左移^0x1021</td><td>0x8800^0x1021=0x9821</td></tr>
+        <tr><td>4</td><td>0x9821</td><td class="hl">1</td><td>左移^0x1021</td><td>0x3042^0x1021=0x2063</td></tr>
+        <tr><td>5</td><td>0x2063</td><td>0</td><td>左移</td><td>0x40C6</td></tr>
+        <tr><td>6</td><td>0x40C6</td><td>0</td><td>左移</td><td>0x818C</td></tr>
+        <tr><td>7</td><td>0x818C</td><td class="hl">1</td><td>左移^0x1021</td><td>0x0318^0x1021=0x1339</td></tr>
+        <tr><td>8</td><td>0x1339</td><td>0</td><td>左移</td><td class="hl">0x2672</td></tr>
+      </table>
+      <div class="ok"><div class="t">■ 中间结果</div><p>CRC16-XMODEM("1") = <b>0x2672</b>。一帧 1024 字节就是把 1024 个字节连续滚 8192 轮，寄存器像一条传送带，前面的字节不断被"推挤"出去，最后整个数据都从寄存器里流过一遍。</p></div>
+
+      <h3>数学本质：多项式除法（模 2 除法）</h3>
+      <p>上面那 8 轮滚动，等价于一个竖式除法：<b>数据左移 16 位后，除以生成多项式 0x11021，余数就是 CRC</b>。"模 2"意思是减法不借位、加法不进位，全部用异或代替：</p>
+      <figure>
+        <svg width="560" height="240" viewBox="0 0 560 240" font-family="Consolas,monospace" font-size="17" font-weight="bold">
+          <text x="60" y="30" fill="#222">数据左移16位:</text>
+          <text x="60" y="58" fill="#222">            1 1 0 0 0 1 [16个0]</text>
+          <text x="60" y="88" fill="#c0392b">   1 0 0 0 1 0 0 0 0 0 1 ) 1 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0</text>
+          <text x="60" y="120" fill="#222">             1 0 0 0 1 0 0 0 0 0 1</text>
+          <text x="60" y="146" fill="#27ae60">             ────────────────────────异或</text>
+          <text x="60" y="174" fill="#222">             0 1 0 0 1 0 0 0 0 0 1 0 0 0 0 0 …  逐位落下，够除就商1再异或</text>
+          <text x="60" y="205" fill="#1a6fc4">余数(不够除剩下的) = CRC16  (16位,不足补0)</text>
+          <text x="60" y="228" fill="#e67e22">商的过程没有意义,只保留余数</text>
+        </svg>
+        <figcaption>模 2 竖式除法：够除就商 1 并异或除数，不够除就商 0 直落——和十进制长除法一个手感，只是"减法"换成了异或</figcaption>
+      </figure>
+
+      <h3>查表法：工程上的提速</h3>
+      <p>逐位滚，1024 字节要 8192 轮循环。工程做法是<b>预生成一张 256 项的表</b>：把"每个字节值滚完 8 轮的效果"提前算好存起来，运行时每个字节只查一次表 + 一次异或：</p>
+      <div class="codeblock">crc = (crc &lt;&lt; 8) ^ crc_table[(crc &gt;&gt; 8) ^ byte];   /* 一行顶八轮 */</div>
+      <div class="purple">
+        <div class="t">■ 验证卡：两条独立路线复核你的实现</div>
+        <p>① 用上面 5 行代码跑 <code>"123456789"</code>，标准校验值 <b>CRC16-XMODEM = 0x31C3</b>——这是协议圈背下来的"九字魔咒"，对上说明变体参数没配错；</p>
+        <p>② 查表法与逐位法各实现一遍，对同一文件跑，两个结果必须逐位一致。两条路线都过，CRC 实现才算过关。</p>
+      </div>
+
+      <div class="why">
+        <div class="t">■ 为什么是"左移异或"就是除法？</div>
+        <p>把数据想成流过寄存器的比特流：每左移一位 = 把下一比特"落"到竖式里；寄存器最高位是 1 说明"够除"，就要减掉除数——模 2 世界里减法就是异或。滚动 8 轮 = 落下一个字节。竖式除法全部滚完剩下的余数，就是寄存器里的值。</p>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ LEVEL 3 ============ -->
+  <section class="level panel" id="lv3">
+    <h3 class="level-head" onclick="toggle(this)">
+      <span class="level-tag">LEVEL 3</span>
+      <h2>MD5 第一步：填充、分块、初始化</h2>
+      <span class="arrow">▶</span>
+    </h3>
+    <div class="level-body"><div>
+
+      <p><b>MD5 的目标</b>：把任意长度的输入压成固定 <b>16 字节指纹</b>。哪怕改 1 个比特，指纹也会面目全非（雪崩效应）。它分四大步：填充 → 分块 → 64 步运算 → 输出。先看前两步。</p>
+
+      <h3>Step 1：填充（Padding）——把长度凑成"512 的倍数减 64"</h3>
+      <p>以你项目验证用的小例子 <code>"abc"</code>（3 字节 = 24 位）为例：</p>
+      <div class="codeblock">原始:   'a'  'b'  'c'                          =  3 字节
+第1步:  补一个 0x80（1000 0000）                = +1 字节
+第2步:  补 0x00 直到总长 ≡ 56 (mod 64)          = 补 52 个 0x00
+第3步:  末尾补 8 字节 = 原始比特长度(24=0x18) 小端 → 18 00 00 00 00 00 00 00
+───────────────────────────────────────────────
+结果:   3 + 1 + 52 + 8 = 64 字节 = 512 位，正好一块</div>
+
+      <div class="warn">
+        <div class="t">⚠ 坑：长度是小端！</div>
+        <p>最后 8 字节长度字段按<b>小端</b>（低位字节在前）写——0x18 放第一个字节。这和网络协议常见的大端习惯相反，实现时写反了指纹必然不对，而且没有任何报错。</p>
+      </div>
+
+      <div class="why">
+        <div class="t">■ 为什么留 64 字节？</div>
+        <p>512 位一块里留出 64 位专门放长度——让"消息内容"和"消息长度"都参与运算，防止不同长度的消息填充后长得一模一样。规则精确到 <b>length ≡ 448 (mod 512)</b>。</p>
+      </div>
+
+      <h3>Step 2：分块——512 位一块，切成 16 个 32 位字</h3>
+      <p>64 字节一块，按<b>小端</b>切成 16 个 32 位整数 M[0]…M[15]，后面 64 步运算就是反复取用这 16 个字。</p>
+
+      <h3>Step 3：初始化——四个魔数链值</h3>
+      <div class="codeblock">A = 0x67452301
+B = 0xEFCDAB89
+C = 0x98BADCFE
+D = 0x10325476</div>
+      <p>这四个值看起来乱，小端逐字节读出来是 <code>0123 4567 89AB CDEF FEDC BA98 7654 3210</code>——初代实现者留的彩蛋。它们叫<b>链值（chaining variables）</b>，是整个 MD5 唯一的状态载体。</p>
+
+      <div class="ok">
+        <div class="t">■ 中间结果</div>
+        <p>无论输入多长，经过填充分块后都变成 <b>N 个 512 位块</b>，并带着 4 个初始链值 A/B/C/D 准备进入主运算。你的 <code>MD5_CTX</code> 结构体里存的就是这 4 个链值 + 已缓冲的未满块。</p>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ LEVEL 4 ============ -->
+  <section class="level panel" id="lv4">
+    <h3 class="level-head" onclick="toggle(this)">
+      <span class="level-tag">LEVEL 4</span>
+      <h2>MD5 第二步：64 步主运算 + 链值累积</h2>
+      <span class="arrow">▶</span>
+    </h3>
+    <div class="level-body"><div>
+
+      <h3>Step 4：每块 64 步——同一个公式换四种调料</h3>
+      <p>每一块做 64 步，全部长一个模样，只有三样东西在换：非线性函数 F、消息字 M[k]、常量 T[i]：</p>
+
+      <div class="formula">a ← b + ( ( a + F(b,c,d) + M[k] + T[i] ) &lt;&lt;&lt; s )</div>
+
+      <table>
+        <tr><th>轮次</th><th>步数</th><th>函数 F</th><th>性格</th></tr>
+        <tr><td>第1轮 (0-15)</td><td>16</td><td class="hl">(b&amp;c)|(~b&amp;d)</td><td>若 b 真 → 取 c，否则取 d（选择）</td></tr>
+        <tr><td>第2轮 (16-31)</td><td>16</td><td>(b&amp;d)|(c&amp;~d)</td><td>多数表决</td></tr>
+        <tr><td>第3轮 (32-47)</td><td>16</td><td>b^c^d</td><td>奇偶（异或三连）</td></tr>
+        <tr><td>第4轮 (48-63)</td><td>16</td><td>c^(b|~d)</td><td>伪随机放大</td></tr>
+      </table>
+
+      <ul>
+        <li><b>M[k]</b>：当前块的 16 个消息字按各轮的打乱顺序取用（第 1 轮顺序取，后面轮次按固定乱序表取——让每个消息字影响多处）；</li>
+        <li><b>T[i]</b>：64 个常量，T[i] = floor(2³² × |sin(i+1)|)——就是正弦表，第一个是 0xD76AA478，作用是打散规律；</li>
+        <li><b>&lt;&lt;&lt; s</b>：循环左移，每轮的移位数也是固定表（7,12,17,22 / 5,9,14,20 / 4,11,16,23 / 6,10,15,21）。</li>
+        <li><b>a,b,c,d</b>：四个链值每步循环换位轮转，一步只改一个。</li>
+      </ul>
+
+      <h3>Step 4.5：块的收尾——链值累加</h3>
+      <div class="codeblock">A = A0 + A' ;  B = B0 + B' ;  C = C0 + C' ;  D = D0 + D'
+     （初始链值 + 本块64步的输出，模2³²加法）</div>
+
+      <h3>Step 5：块与块之间——链值接力</h3>
+      <p>这就是"累积指纹"的核心：<b>上一块输出的链值，是下一块的初始链值</b>。块与块之间没有别的通信，全靠这四个 32 位数接力：</p>
+      <figure>
+        <svg width="860" height="150" viewBox="0 0 860 150" font-family="Microsoft YaHei" font-size="14" font-weight="bold">
+          <rect x="10"  y="40" width="150" height="56" fill="#e8f6ff" stroke="#222" stroke-width="3"/>
+          <text x="28" y="64" fill="#222">块1(512位)</text>
+          <text x="28" y="86" fill="#1a6fc4">64步运算</text>
+          <rect x="215" y="40" width="150" height="56" fill="#e8f6ff" stroke="#222" stroke-width="3"/>
+          <text x="233" y="64" fill="#222">块2(512位)</text>
+          <text x="233" y="86" fill="#1a6fc4">64步运算</text>
+          <rect x="420" y="40" width="150" height="56" fill="#e8f6ff" stroke="#222" stroke-width="3"/>
+          <text x="438" y="64" fill="#222">…块N(512位)</text>
+          <text x="438" y="86" fill="#1a6fc4">64步运算</text>
+          <rect x="640" y="40" width="190" height="56" fill="#ffd93d" stroke="#222" stroke-width="3"/>
+          <text x="668" y="64" fill="#222">输出 16 字节</text>
+          <text x="656" y="86" fill="#222">A,B,C,D 级联小端</text>
+          <line x1="160" y1="68" x2="215" y2="68" stroke="#e67e22" stroke-width="4"/>
+          <polygon points="215,68 203,62 203,74" fill="#e67e22"/>
+          <text x="150" y="30" fill="#e67e22">链值A'B'C'D'接力 →</text>
+          <line x1="365" y1="68" x2="420" y2="68" stroke="#e67e22" stroke-width="4"/>
+          <polygon points="420,68 408,62 408,74" fill="#e67e22"/>
+          <line x1="570" y1="68" x2="640" y2="68" stroke="#e67e22" stroke-width="4"/>
+          <polygon points="640,68 628,62 628,74" fill="#e67e22"/>
+          <text x="10" y="130" fill="#555">每一块都把"上一块消化后的链值"当起点——所以一块一块喂，结果和一口气算完完全一样</text>
+        </svg>
+        <figcaption>链值接力 = 流式累积的本质：状态只有 4 个 32 位数（16 字节），与消息总长无关</figcaption>
+      </figure>
+
+      <h3>输出：16 字节指纹</h3>
+      <p>最后一块消化完，把 A、B、C、D 四个链值<b>按小端级联</b>成 16 字节，就是 MD5 值。</p>
+
+      <div class="purple">
+        <div class="t">■ 验证卡：标准答案复核</div>
+        <p>你实现的 MD5 对 <code>"abc"</code> 算出来的指纹必须是：</p>
+        <p class="mono" style="font-size:17px;">90015098 3cd24fb0 d6963f7d 28e17f72</p>
+        <p>这是 RFC 1327 时代的标准测试向量（严格说出自 RFC 1321 附录），全网通用。对上了 = 填充、小端、64 步、级联全对；错一位 = 回去查填充或端序。你的 <code>md5.c</code> 还可以和上位机工具互验：两端对同一个 .bin 算指纹，必须逐字节一致。</p>
+      </div>
+
+      <div class="ok">
+        <div class="t">■ 映射回你的项目：三段式 API</div>
+        <p><code>MD5Init()</code> = 装入四个魔数链值；<code>MD5Update()</code> = 喂一块（不满 64 字节先攒着）；<code>MD5Final()</code> = 自动补齐最后一块（含填充+长度）并输出 16 字节。<b>Boot_Decrypt_Copy 边解密边喂 Update，1KB 缓冲满一次喂一次</b>，最后 Final 出的 digest 和密文包尾部预留的 16 字节 memcmp——过了，固件才算完整。</p>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ LEVEL 5 ============ -->
+  <section class="level panel" id="lv5">
+    <h3 class="level-head" onclick="toggle(this)">
+      <span class="level-tag">LEVEL 5</span>
+      <h2>CRC vs MD5：分工、速度与三层校验全景</h2>
+      <span class="arrow">▶</span>
+    </h3>
+    <div class="level-body"><div>
+
+      <table>
+        <tr><th></th><th>CRC16</th><th>MD5</th></tr>
+        <tr><td>岗位</td><td class="hl">帧级 · 传输误码检测</td><td class="hl">文件级 · 整包完整性验收</td></tr>
+        <tr><td>覆盖范围</td><td>每帧数据区（128/1024B）</td><td>整个解密后的固件明文</td></tr>
+        <tr><td>数学本质</td><td>多项式除法取余数</td><td>512位分块 + 64步压缩 + 链值累积</td></tr>
+        <tr><td>输出长度</td><td>2 字节</td><td>16 字节</td></tr>
+        <tr><td>速度</td><td>极快（查表每字节1次）</td><td>较慢（每512位做64步）</td></tr>
+        <tr><td>强度</td><td>防误码（突发≤16位必检出）</td><td>防意外损坏；改1位指纹全变</td></tr>
+        <tr><td>失败动作</td><td>NAK → 发送方重传本帧</td><td>判包无效 → 不搬运/不转正</td></tr>
+      </table>
+
+      <div class="why">
+        <div class="t">■ 为什么两个都要？——层次不同，职责不同</div>
+        <p>CRC 管的是"路上有没有颠坏"：粒度细到每帧，坏了立刻重传，代价最小。MD5 管的是"最终交货对不对"：粗到整个文件，最后总验收一次。如果只有 CRC，帧内误码全被拦住，但"上位机打包时文件就错了"或"Flash 存储期间坏块"这类<b>非传输层</b>问题没人管；如果只有 MD5，坏一帧就得整包重来。两层嵌套，各管一段，漏检概率相乘后才算总风险。</p>
+      </div>
+
+      <h3>你项目的三层校验全景</h3>
+      <div class="codeblock">第1层  Ymodem帧级   CRC16-CCITT   → 坏帧NAK重传        （传输层）
+第2层  结构级       包长互验       → 16B头(固件大小) ↔ 密文包总长（防截断）
+第3层  文件级       MD5整包指纹    → 边解密边累积,尾部比对（验收层）
+      ↳ 三层全过,密文才敢解密、固件才敢搬运、App才敢转正</div>
+
+      <div class="ok">
+        <div class="t">■ 中间结果</div>
+        <p>回到和 AES 的合影：<b>AES 管"看不懂"，CRC 管"路上没坏"，MD5 管"交货对版"</b>——加密、帧检、验收，三件套各司其职，谁也不能替谁。</p>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ BOSS ============ -->
+  <section class="level panel boss" id="lv6">
+    <h3 class="level-head" onclick="toggle(this)">
+      <span class="level-tag">BOSS战警告</span>
+      <h2>五个最容易被钓死的坑</h2>
+      <span class="arrow">▶</span>
+    </h3>
+    <div class="level-body"><div>
+
+      <div class="pit"><span class="bad">坑1：MD5 长度字段按大端写。</span> <span class="good">正解：64 位长度是小端，低位字节在前——写反不报错，指纹全错。</span></div>
+      <div class="pit"><span class="bad">坑2：把 CRC 初值背成 0xFFFF。</span> <span class="good">正解：CRC16/XMODEM 初值是 0x0000；0xFFFF 是另一个变体（CRC-CCITT FALSE）。品种三件套（初值/反射/异或）必须两端一致，用"123456789"→0x31C3 验品种。</span></div>
+      <div class="pit"><span class="bad">坑3：以为 CRC 算整帧含帧头。</span> <span class="good">正解：Ymodem 的 CRC 只覆盖数据区（128/1024 字节），帧头帧号不在其内；帧号的完整性由"seq+反码=255"单独守护。</span></div>
+      <div class="pit"><span class="bad">坑4：把 MD5 的链值和 AES 的 IV 搞混。</span> <span class="good">正解：长得像，职责不同——IV 是"本组密文的异或搭档"，链值是"上一块消息的消化产物"。IV 由密文前移，链值由压缩函数更新。</span></div>
+      <div class="pit"><span class="bad">坑5：对密文算 MD5。</span> <span class="good">正解：包尾指纹是上位机对"明文"算的，Boot 必须边解密边对解出来的明文喂 Update——对密文算等于给错了考卷，永远比对失败。</span></div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ STAGE CLEAR ============ -->
+  <section class="level panel clear" id="lv7">
+    <h3 class="level-head" onclick="toggle(this)">
+      <span class="level-tag">STAGE CLEAR</span>
+      <h2>— 通关清单 —</h2>
+      <span class="arrow">▶</span>
+    </h3>
+    <div class="level-body"><div style="text-align:center;">
+      <div style="font-size:34px;">🏆</div>
+      <div class="list">
+        <ol>
+          <li><b>CRC 本质 = 多项式除法取余数</b>：数据左移16位除以 0x11021，模2运算（异或代替减法），余数即 CRC；</li>
+          <li><b>CRC 单字节操作 = 5 行代码</b>：余数寄存器 ^= 字节&lt;&lt;8，滚 8 轮，最高位为 1 就左移后异或 0x1021，为 0 只左移；</li>
+          <li><b>CRC 品种三件套</b>（初值/反射/结果异或）决定结果，Ymodem 用 XMODEM 变体（init=0），用 "123456789"→<b>0x31C3</b> 验证；</li>
+          <li><b>MD5 四大步</b>：填充（补0x80、补0到 ≡448 mod 512、尾补64位<b>小端</b>长度）→ 512位分块切16字 → 4个魔数链值 → 每块64步；</li>
+          <li><b>64 步公式</b>：a ← b + ((a + F(b,c,d) + M[k] + T[i]) &lt;&lt;&lt; s)，四轮换 F（选择/表决/奇偶/伪随机），T[i]=2³²|sin(i+1)|，链值每步轮转；</li>
+          <li><b>累积指纹的原理 = 链值接力</b>：上一块输出链值是下一块初始链值，状态只有 16 字节，与消息总长无关——所以 Init/Update/Final 能流式，块块接力 ≡ 一口气算完；</li>
+          <li><b>输出</b>：A,B,C,D 小端级联 16 字节；标准向量 MD5("abc")=<b>900150983cd24fb0d6963f7d28e17f72</b>；</li>
+          <li><b>分工</b>：AES 管机密（看不懂），CRC 管传输（每帧没坏，坏了重传），MD5 管验收（整包对版，不对不转正）——三层校验各司其职。</li>
+        </ol>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- 结尾吉祥物 -->
+  <div class="mascot-row">
+    <svg class="dog" width="96" height="72" viewBox="0 0 24 18">
+      <rect x="16" y="0" width="4" height="4" fill="#222"/>
+      <rect x="20" y="0" width="4" height="4" fill="#222"/>
+      <rect x="14" y="4" width="10" height="8" fill="#fff"/>
+      <rect x="13" y="4" width="1" height="8" fill="#222"/>
+      <rect x="24" y="4" width="1" height="8" fill="#222"/>
+      <rect x="14" y="12" width="10" height="1" fill="#222"/>
+      <rect x="15" y="6" width="2" height="2" fill="#222"/>
+      <rect x="21" y="6" width="2" height="2" fill="#222"/>
+      <rect x="18" y="8" width="2" height="2" fill="#222"/>
+      <rect x="18" y="10" width="3" height="2" fill="#e84c3d"/>
+      <rect x="2" y="6" width="12" height="8" fill="#fff"/>
+      <rect x="1" y="5" width="14" height="1" fill="#222"/>
+      <rect x="1" y="14" width="14" height="1" fill="#222"/>
+      <rect x="0" y="6" width="1" height="8" fill="#222"/>
+      <rect x="0" y="2" width="2" height="4" fill="#222"/>
+      <rect x="3" y="15" width="3" height="2" fill="#222"/>
+      <rect x="10" y="15" width="3" height="2" fill="#222"/>
+    </svg>
+    <div class="rpg">三层校验全拆完了：AES 你已通关，CRC 滚 8 轮、MD5 链值接力——现在校验链上没有黑盒了。去面试官那里说"我可以手算给你看"吧！</div>
+  </div>
+
+</div>
+
+<script>
+  var levels = document.querySelectorAll('.level');
+  var opened = 0;
+  var total = levels.length;
+
+  function openLevel(lv, reward) {
+    lv.classList.add('open');
+    if (reward) {
+      opened++;
+      var pct = Math.round(opened / total * 100);
+      document.getElementById('expbar').style.width = pct + '%';
+      document.getElementById('coinNum').textContent = opened;
+    }
+  }
+
+  function toggle(head) {
+    var lv = head.parentElement;
+    if (lv.classList.contains('open')) {
+      lv.classList.remove('open');      /* 手动收起不扣奖励 */
+    } else {
+      var wasOpen = lv.classList.contains('open');
+      if (!wasOpen) {
+        /* 若是自动展开前手动打开,计入奖励防刷 */
+        if (!lv.dataset.done) { lv.dataset.done = 1; openLevel(lv, true); }
+        else { lv.classList.add('open'); }
+      }
+    }
+  }
+
+  /* 自动依次展开 */
+  levels.forEach(function (lv, i) {
+    setTimeout(function () {
+      if (!lv.dataset.done) { lv.dataset.done = 1; openLevel(lv, true); }
+    }, 600 + i * 900);
+  });
+</script>
+
+</body>
+</html>

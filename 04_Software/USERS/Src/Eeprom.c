@@ -18,6 +18,8 @@
 /* 包含头文件 *******************************************************************************************/
 #include "Eeprom.h"
 #include "cmsis_os.h"      /* osDelay —— 等写周期时让出 CPU */
+#include "bsp_i2c1_bus.h"  /* I2C1 总线互斥锁：022 移植后触摸芯片(CST816S)与
+                              EEPROM 共享 I2C1，两个任务的事务必须互斥 */
 
 /* 私有宏 ***********************************************************************************************/
 
@@ -46,11 +48,14 @@ static int8_t Eeprom_WaitWriteDone(void)
     {
         /* 只发地址不发数据：芯片应答 = 内部写周期已结束。
            HAL_I2C_IsDeviceReady 就是干这个的，省得自己拼 */
+        bsp_i2c1_lock();
         if (HAL_I2C_IsDeviceReady(&hi2c1, AT24C02_ADDR_HAL, 1U,
                                   I2C_XFER_TIMEOUT_MS) == HAL_OK)
         {
+            bsp_i2c1_unlock();
             return 0;
         }
+        bsp_i2c1_unlock();
 
         if ((HAL_GetTick() - start) >= EEPROM_WRITE_CYCLE_MS)
         {
@@ -66,11 +71,14 @@ static int8_t Eeprom_WaitWriteDone(void)
 int8_t Eeprom_Init(void)
 {
     /* 上电后 EEPROM 可能还在做上一次的写周期，多给几次机会 */
+    bsp_i2c1_lock();
     if (HAL_I2C_IsDeviceReady(&hi2c1, AT24C02_ADDR_HAL, 3U,
                               I2C_XFER_TIMEOUT_MS) != HAL_OK)
     {
+        bsp_i2c1_unlock();
         return -1;
     }
+    bsp_i2c1_unlock();
     return 0;
 }
 
@@ -82,6 +90,7 @@ int8_t Eeprom_Read(uint8_t mem_addr, uint8_t *buf, uint16_t len)
     }
 
     /* AT24C02 的内存地址是 8 位，读写都要先发一个字节的地址 */
+    bsp_i2c1_lock();
     if (HAL_I2C_Mem_Read(&hi2c1,
                          AT24C02_ADDR_HAL,
                          (uint16_t)mem_addr,
@@ -90,8 +99,10 @@ int8_t Eeprom_Read(uint8_t mem_addr, uint8_t *buf, uint16_t len)
                          len,
                          I2C_XFER_TIMEOUT_MS) != HAL_OK)
     {
+        bsp_i2c1_unlock();
         return -1;
     }
+    bsp_i2c1_unlock();
     return 0;
 }
 
@@ -123,6 +134,7 @@ int8_t Eeprom_Write(uint8_t mem_addr, const uint8_t *buf, uint16_t len)
             chunk = (uint16_t)(len - written);
         }
 
+        bsp_i2c1_lock();
         if (HAL_I2C_Mem_Write(&hi2c1,
                               AT24C02_ADDR_HAL,
                               (uint16_t)addr,
@@ -131,8 +143,10 @@ int8_t Eeprom_Write(uint8_t mem_addr, const uint8_t *buf, uint16_t len)
                               chunk,
                               I2C_XFER_TIMEOUT_MS) != HAL_OK)
         {
+            bsp_i2c1_unlock();
             return -1;
         }
+        bsp_i2c1_unlock();
 
         /* 每页写完都要等写周期，不然下一次传输会被芯片 NAK */
         if (Eeprom_WaitWriteDone() != 0)

@@ -75,8 +75,6 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(SPI1_cs_GPIO_Port, &GPIO_InitStruct);
 
-}
-
 /* USER CODE BEGIN 2 */
   /* 按键 PA0 补上内部上拉。
      CubeMX 里这个脚是普通输入，Pull 配的 NOPULL(见上面第 68 行)，
@@ -89,3 +87,5 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(Key_GPIO_Port, &GPIO_InitStruct);
 /* USER CODE END 2 */
+
+}

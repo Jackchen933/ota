@@ -48,9 +48,13 @@
 #define W25Q64_SECTOR_ERASE_TIMEOUT_MS  (3000UL)    /* 4KB 扇区擦除最长 400ms */
 #define W25Q64_CHIP_ERASE_TIMEOUT_MS    (250000UL)  /* 整片擦除最长 250s */
 
-/* W25Q64 的 OTA 数据区起始地址。
-   从 0 开始，最多存 8MB；实际只用到固件大小的那么多扇区。
-   注意: 这个值只影响"固件正文"存哪，和 EEPROM 里记的大小是两回事。 */
+/* W25Q64 的 OTA 数据区(A区域)起始地址 —— 与 Bootloader 的 common.h 对齐。
+   分区约定(App 只用 A 区域, B 区域是 Boot 的备份区, 不得碰):
+     0x000000 ~ 0x07FFFF  A区域(512KB): App 后台下载的密文包落在这里,
+                          收完后 Boot 子流程A 从这里解密搬运到 App 运行区
+     0x080000 ~ 0x0FFFFF  B区域(512KB): Boot 的备份区(子流程E/C 用)
+   收到的字节流是上位机/服务器给的【密文包】:
+     [16B加密头][固件AES密文][16B MD5指纹], 头里藏着固件真实大小 */
 #define W25Q64_OTA_BASE_ADDR    (0UL)
 
 /* Exported functions -----------------------------------------------------------------------------------*/

@@ -35,7 +35,7 @@ extern "C" {
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN Private defines */
-
+extern DMA_HandleTypeDef hdma_spi2_tx;   /* 屏幕专用（screen_hw.c 初始化） */
 /* USER CODE END Private defines */
 
 void MX_DMA_Init(void);

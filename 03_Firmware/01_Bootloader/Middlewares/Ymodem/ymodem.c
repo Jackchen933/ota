@@ -25,33 +25,16 @@
   
 /* Includes ------------------------------------------------------------------*/
 #include "common.h"
-//#include "stm32f10x_flash.h"
+#include "Boot_Manager.h"
+#include "w25qxx.h"
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
 uint8_t file_name[FILE_NAME_LENGTH];
-uint32_t FlashDestination = BackAppAddress; 
-uint16_t PageSize = PAGE_SIZE;
-uint32_t EraseCounter = 0x0;
-uint32_t NbrOfPage = 0;
-FLASH_Status FLASHStatus = FLASH_COMPLETE;
-uint32_t RamSource;
+static uint32_t W25Dest = W25Q64_APP_BASE;  /* 外部Flash A区域当前写入地址 */
 extern uint8_t tab_1024[1024];
-
-/* F4 闪存按扇区擦除, 把字节地址映射为扇区号(0-3各16KB,4为64KB,5-7各128KB) */
-static uint32_t FlashSectorFromAddr(uint32_t addr)
-{
-    if (addr < 0x08004000) return FLASH_Sector_0;
-    if (addr < 0x08008000) return FLASH_Sector_1;
-    if (addr < 0x0800C000) return FLASH_Sector_2;
-    if (addr < 0x08010000) return FLASH_Sector_3;
-    if (addr < 0x08020000) return FLASH_Sector_4;
-    if (addr < 0x08040000) return FLASH_Sector_5;
-    if (addr < 0x08060000) return FLASH_Sector_6;
-    return FLASH_Sector_7;
-}
 
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
@@ -159,8 +142,9 @@ int32_t Ymodem_Receive (uint8_t *buf)
   uint8_t packet_data[PACKET_1K_SIZE + PACKET_OVERHEAD], file_size[FILE_SIZE_LENGTH], *file_ptr, *buf_ptr;
   int32_t i, j, packet_length, session_done, file_done, packets_received, errors, session_begin, size = 0;
 
-  /* Initialize FlashDestination variable */
-  FlashDestination = BackAppAddress;
+  /* Initialize W25Dest variable */
+  /* 流程图子流程D1: 密文包写入外部Flash(W25Q64)的A区域 */
+  W25Dest = W25Q64_APP_BASE;
 
   for (session_done = 0, errors = 0, session_begin = 0; ;)//��ʼ������������ѭ��
   {
@@ -209,7 +193,7 @@ int32_t Ymodem_Receive (uint8_t *buf)
 
                     /* Test the size of the image to be sent */
                     /* Image size is greater than Flash size */
-                    if (size > APP_SLOT_SIZE)
+                    if ((size <= 0) || ((uint32_t)size > W25Q64_APP_SIZE))
                     {
                       /* End session */
                       Send_Byte(CA);
@@ -217,10 +201,68 @@ int32_t Ymodem_Receive (uint8_t *buf)
                       return -1;
                     }
 
-                    /* Erase the FLASH pages where the user application will be loaded */
-                    /* 双区方案: 固件下载到B区(备份区,0x08020000,扇区5,128KB)
-                       一个扇区(128KB)即可覆盖整个B区槽位, 一次擦除完成 */
-                    FLASHStatus = FLASH_EraseSector(FlashSectorFromAddr(BackAppAddress), VoltageRange_3);
+                    /* 擦除外部Flash A区域中涉及的4KB扇区。
+                       2026-10-11 实测: 曾出现"只有第1个扇区真擦掉, 后面的扇区
+                       W25Qx_Erase_Block 照样返回OK但芯片没执行"的情况, 新密文
+                       AND 旧残留变成脏数据, 直到3分钟后MD5比对才爆雷。
+                       所以每个扇区擦完立即读回头/中/尾三处, 不是全FF就重擦,
+                       重擦3次仍脏就CA CA中止, 让上位机当场报错。 */
+                    {
+                      uint32_t off;
+
+                      for (off = 0; off < (uint32_t)size; off += 4096)
+                      {
+                        const uint32_t probe_off[3] = {0u, 2048u, 4088u};
+                        uint32_t attempt;
+                        uint8_t  is_blank = 0u;
+
+                        for (attempt = 0; (attempt < 3u) && (0u == is_blank); attempt++)
+                        {
+                          uint32_t p;
+
+                          is_blank = 1u;
+
+                          if (W25Qx_Erase_Block(W25Q64_APP_BASE + off) != W25Qx_OK)
+                          {
+                            is_blank = 0u;      /* 擦除命令本身失败, 重试 */
+                          }
+
+                          /* 抽查扇区头/中/尾各8字节, 必须全FF才算擦干净 */
+                          for (p = 0; (p < 3u) && (0u != is_blank); p++)
+                          {
+                            uint8_t chk[8];
+                            uint8_t k;
+
+                            if (W25Qx_Read(chk, W25Q64_APP_BASE + off + probe_off[p], 8u) != W25Qx_OK)
+                            {
+                              is_blank = 0u;
+                            }
+                            else
+                            {
+                              for (k = 0u; k < 8u; k++)
+                              {
+                                if (chk[k] != 0xFFu)
+                                {
+                                  is_blank = 0u;
+                                  break;
+                                }
+                              }
+                            }
+                          }
+                        }
+
+                        if (0u == is_blank)
+                        {
+                          Send_Byte(CA);
+                          Send_Byte(CA);
+                          return -2;
+                        }
+                      }
+                    }
+
+                    /* 正式开始传输: 启动看门狗(等待首帧期间不开, 允许慢慢操作) */
+                    IWDG_Start();
+
                     Send_Byte(ACK);
                     Send_Byte(CRC16);
                   }
@@ -236,22 +278,23 @@ int32_t Ymodem_Receive (uint8_t *buf)
                 /* Data packet */
                 else
                 {
-                  memcpy(buf_ptr, packet_data + PACKET_HEADER, packet_length);
-                  RamSource = (uint32_t)buf;
-                  for (j = 0;(j < packet_length) && (FlashDestination <  BackAppAddress + size);j += 4)
+                  /* 写入外部Flash A区域; 末包按声明大小截掉0x1A填充字节 */
                   {
-                    /* Program the data received into STM32F10x Flash */
-                    FLASH_ProgramWord(FlashDestination, *(uint32_t*)RamSource);
+                    uint32_t written = (uint32_t)(W25Dest - W25Q64_APP_BASE);
+                    uint32_t remain  = (uint32_t)size - written;
+                    uint32_t wr      = ((uint32_t)packet_length < remain) ? (uint32_t)packet_length : remain;
 
-                    if (*(uint32_t*)FlashDestination != *(uint32_t*)RamSource)
+                    if (wr > 0)
                     {
-                      /* End session */
-                      Send_Byte(CA);
-                      Send_Byte(CA);
-                      return -2;
+                      if (W25Qx_Write(packet_data + PACKET_HEADER, W25Dest, wr) != W25Qx_OK)
+                      {
+                        Send_Byte(CA);
+                        Send_Byte(CA);
+                        return -2;
+                      }
+                      W25Dest += wr;
                     }
-                    FlashDestination += 4;
-                    RamSource += 4;
+                    IWDG_Feed();        /* 流程图: 写入A区域后喂狗 */
                   }
                   Send_Byte(ACK);
                 }

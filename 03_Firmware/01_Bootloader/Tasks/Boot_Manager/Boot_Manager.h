@@ -1,42 +1,51 @@
+/*********************************************************************************************************
+ * @file    Boot_Manager.h
+ *
+ * @brief   Bootloader 主状态机(按《Bootloader主线流程》流程图实现)
+ *
+ *          分区(见 common.h):
+ *            内部Flash: 扇区0-1=Bootloader | 扇区2=标志扇区 | 扇区3-7=App运行区(0x0800C000,464KB)
+ *            外部W25Q64: A区域(0x000000,512KB)=新固件密文 | B区域(0x080000,512KB)=备份密文
+ *
+ *          密文包格式(W25Q64 A/B区域里存的文件, 上位机打包工具生成, 双方必须一致):
+ *            [0..15]     AES-128-CBC 加密头: 明文=12字节自定义+4字节固件大小(小端)
+ *            [16..N-17]  固件密文(按16字节分组)
+ *            [N-16..N-1] MD5(解密后的固件明文), 明文存放16字节
+ *            总长 N = 16 + roundup16(固件大小) + 16
+ *
+ *          主线上电按标志扇区状态分发(见 main.c):
+ *            APP_ST_DL_PENDING -> Boot_SubflowA()  解密搬运A区到运行区, MD5通过置"验证新App"
+ *            APP_ST_VERIFY_NEW -> Boot_SubflowB()  开IWDG后跳转App(App自检后置"A区搬运至B区")
+ *            APP_ST_VALID      -> JumpToApp()      正常启动
+ *            APP_ST_AB_MOVE    -> Boot_SubflowE()  外部A区密文拷到B区备份, 置"有效App"
+ *            其他/空白         -> Boot_PathD()     查B区备份决定回滚或待机/按键Ymodem下载
+ *
+ * @version V1.0 2026-09-23
+ * ********************************************************************************************************/
 #ifndef __BOOT_MANAGER_H
 #define __BOOT_MANAGER_H
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f4xx.h"
-/* Exported types ------------------------------------------------------------*/
-typedef void(*pFunction)(void);
-/* Exported constants --------------------------------------------------------*/
-/* Exported macro ------------------------------------------------------------*/
-#define ApplicationAddress   0x8008000
-#define BackApplicationAddress   0x8020000
-#define NVIC_VectTab_FLASH   ((uint32_t)0x08000000)
+#include "common.h"
+#include "FlagSector.h"
 
-/* 槽位容量 */
-#define APP_SLOT_SIZE        0x18000    /* A区(运行区)96KB: 0x08020000 - 0x08008000 */
-#define BACK_SLOT_SIZE       0x20000    /* B区(备份区)128KB: 扇区5, 0x08020000 起 */
-
-/* ===== 新方案: APP 后台把固件下到外部 W25Q64, 上电由这里搬到 A 区 =====
-   W25Q64 里固件的起始偏移。必须和 APP 侧 USERS/Inc/W25q64.h 的
-   W25Q64_OTA_BASE_ADDR 一致(目前都是 0) */
-#define W25Q64_APP_BASE      0UL
+/* pFunction 取自 common.h(本文件已包含), 勿在此重复 typedef */
 
 /* Exported functions --------------------------------------------------------*/
 
-void JumpToApp(void);
-uint8_t Slot_IsValid(uint32_t addr);
-int8_t BackToApp(int32_t fl_size);
-void Backup_Invalidate(void);
-extern int32_t app_size;   /* Ymodem收到的密文总长度, main.c赋值 */
+/* ---- 主线各分支(main.c调用, 互斥进入) ---- */
+void Boot_SubflowA(void);   /* App下载固件待更新: 解密搬运 -> MD5 -> 置"验证新App" -> 软复位 */
+void Boot_SubflowB(void);   /* 验证新App: 开IWDG -> 跳转App */
+void Boot_SubflowC(void);   /* 回滚备份区: B区解密搬运 -> MD5 -> 置"有效App"/"无效" -> 软复位 */
+void Boot_SubflowE(void);   /* A区搬运至B区: 外部Flash内密文备份 -> 置"有效App" -> 软复位 */
+void Boot_PathD(void);      /* 其他/空白: 查备份回滚, 否则待机等按键 -> Ymodem下载 -> 搬运 */
+void JumpToApp(void);       /* 跳转App运行区(内部关闭TIM3/重映射向量表到0x0800C000) */
 
-/**
-  * @brief  检查 EEPROM 里的升级请求, 有的话把 W25Q64 里的新固件搬到 A 区
-  * @param  None
-  * @retval  1: 升级完成, 调用方应跳转 A 区运行
-  *          0: 没有升级请求(或上次下载中途掉电, 已清标志), 调用方按老流程走
-  *         -1: 有升级请求但搬运失败 —— A 区内容【不可信】, 绝对不能跳转,
-  *             调用方要落到 Ymodem 救援分支
-  * @note   本函数会自己 W25Q64_Init() 和 Eeprom_Init(), 调用前不用做任何准备。
-  */
-int8_t Boot_Ota_Update(void);
+/* ---- 看门狗(独立看门狗IWDG, "SS看门狗") ----
+   注意: IWDG一旦开启无法关闭, 跳转App后由App侧继续喂狗,
+   App自检+启动必须在超时时间内完成。 */
+void IWDG_Start(void);      /* 启动IWDG, 超时约8.2秒(LSI 32kHz/64分频/重装4095) */
+void IWDG_Feed(void);       /* 喂狗 */
 
 #endif /* __BOOT_MANAGER_H */

@@ -65,7 +65,16 @@ void Error_Handler(void);
 #define SPI1_cs_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
-
+/* ---- 022 屏幕界面移植：屏幕/触摸引脚标签（与源工程 jiemian1 一致） ----
+   BSP 的 bsp_st7789_port.c / bsp_cst816s.c 通过这些宏访问引脚 */
+#define SPI_CS_Pin        GPIO_PIN_8
+#define SPI_CS_GPIO_Port  GPIOA
+#define SPI_RESET_Pin     GPIO_PIN_11
+#define SPI_RESET_GPIO_Port GPIOA
+#define SPI_DC_Pin        GPIO_PIN_14
+#define SPI_DC_GPIO_Port  GPIOB
+#define TOUCH_RST_Pin     GPIO_PIN_0
+#define TOUCH_RST_GPIO_Port GPIOB
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

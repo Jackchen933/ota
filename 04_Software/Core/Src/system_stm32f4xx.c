@@ -89,7 +89,7 @@
 /* Note: Following vector table addresses must be defined in line with linker
          configuration. */
 /* 本 APP 不是一个从 0x08000000 启动的独立程序，而是被 Bootloader 搬到
-   0x08008000 执行的 —— 见 MDK-ARM/04_Software/04_Software.sct 的 LR_IROM1。
+   0x0800C000 执行的 —— 见 MDK-ARM/04_Software/04_Software.sct 的 LR_IROM1。
    向量表必须跟着搬，否则中断全都会跳到 Bootloader 的向量表里去。
    这段是原厂生成的，平时是注释状态；OTA 分区工程必须打开。 */
 #define USER_VECT_TAB_ADDRESS
@@ -106,9 +106,10 @@
 #else
 #define VECT_TAB_BASE_ADDRESS   FLASH_BASE      /*!< Vector Table base address field.
                                                      This value must be a multiple of 0x200. */
-/* 0x8000 = A 区相对 Flash 起始的偏移，与 Ota.h 的 OTA_APP_ADDRESS 一致，
-   改分区布局时这两处必须同步改 */
-#define VECT_TAB_OFFSET         0x00008000U     /*!< Vector Table base offset field.
+/* 0xC000 = A 区相对 Flash 起始的偏移。
+   分区: Boot 32KB(0x08000000) + 标志扇区 16KB(0x08008000) -> App 从 0x0800C000 起。
+   与 04_Software.sct 的 LR_IROM1 一致，改分区布局时这两处必须同步改 */
+#define VECT_TAB_OFFSET         0x0000C000U     /*!< Vector Table base offset field.
                                                      This value must be a multiple of 0x200. */
 #endif /* VECT_TAB_SRAM */
 #endif /* USER_VECT_TAB_ADDRESS */

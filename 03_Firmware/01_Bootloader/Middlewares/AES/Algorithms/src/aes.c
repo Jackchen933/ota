@@ -850,7 +850,7 @@ void AES_Decrypt(const unsigned char *pCipherText, unsigned char *pPlainText,
   * 即 InvCipher(本组) 再异或 pIV，正好就是单分组 CBC 解密的定义，
   * 所以这里直接复用它，不用把 InvCipher 暴露出来。
   */
-void Aes_IV_256bit_Decode(unsigned char *pIV, unsigned char *pData,
+void Aes_IV_128bit_Decode(unsigned char *pIV, unsigned char *pData,
                           const unsigned char *pKey)
 {
     /* 已经做过密钥扩展的那个密钥是谁。密钥表是固定的静态数组，比指针即可 */

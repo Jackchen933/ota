@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Bootloader主线流程（完整版）</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background:#fff; margin:0; padding:20px; color:#333; }
+  h1 { text-align:center; font-size:28px; }
+  h2 { font-size:20px; border-left:5px solid #8e7cc3; padding-left:10px; margin-top:40px; }
+  .canvas { display:flex; gap:30px; justify-content:center; flex-wrap:wrap; align-items:flex-start; }
+  .panel { border:1px solid #999; background:#f7f7f7; border-radius:6px; padding:14px 18px; min-width:250px; }
+  .panel-title { font-size:14px; color:#333; margin-bottom:12px; font-weight:bold; }
+  .col { display:flex; flex-direction:column; align-items:center; }
+  .node { border:1px solid #444; border-radius:6px; padding:10px 14px; text-align:center; font-size:13px; line-height:1.5; max-width:210px; }
+  .op    { background:#d6f5d6; }
+  .dec   { background:#fdeeba; border-radius:2px; }
+  .flag  { background:#fbd5d5; }
+  .start { background:#e3d7f7; border-radius:40px; padding:10px 22px; }
+  .arrow { width:2px; height:26px; background:#555; position:relative; margin:0 auto; }
+  .arrow::after { content:""; position:absolute; bottom:-1px; left:-4px; border:5px solid transparent; border-top-color:#555; }
+  .lbl { font-size:12px; margin:2px 0; text-align:center; }
+  .lbl.n { color:#c0392b; font-weight:bold; }
+  .lbl.y { color:#27ae60; font-weight:bold; }
+  .row { display:flex; align-items:flex-start; justify-content:center; gap:20px; width:100%; }
+  .down { display:flex; flex-direction:column; align-items:center; }
+  .mainflow { display:flex; flex-direction:column; align-items:center; margin:20px 0 30px; }
+  .vline { width:2px; height:20px; background:#555; margin:0 auto; }
+  .branches { display:flex; gap:10px; margin-top:6px; flex-wrap:wrap; justify-content:center; }
+  .branch { border:1px dashed #888; border-radius:6px; padding:8px 12px; font-size:13px; text-align:center; min-width:150px; background:#fbfbfb; }
+  .branch b { color:#8e7cc3; }
+</style>
+</head>
+<body>
+
+<h1>Bootloader主线流程（完整版）</h1>
+
+<!-- ================= 主线 ================= -->
+<h2>① 主线</h2>
+<div class="mainflow">
+  <div class="node start">Power on</div>
+  <div class="arrow"></div>
+  <div class="node dec">检查当前App标识</div>
+  <div class="vline"></div>
+  <div class="branches">
+    <div class="branch">App下载固件待更新<br>→ <b>子流程A</b></div>
+    <div class="branch">验证新App<br>→ <b>子流程B</b></div>
+    <div class="branch">有效App<br>→ <b>跳转App</b>（正常启动）</div>
+    <div class="branch">A区搬运至B区<br>→ <b>子流程E：更新备份区App</b></div>
+    <div class="branch">其他<br>→ 往下 ↓ <b>主线路径D</b></div>
+  </div>
+</div>
+
+<!-- ============ 主线路径D（其他） ============ -->
+<h2>② 主线路径D（其他：全新/待机状态）</h2>
+<div class="canvas">
+  <div class="panel" style="min-width:300px">
+    <div class="panel-title">主线路径D</div>
+    <div class="col">
+      <div class="node op">初始化Mcu驱动</div><div class="arrow"></div>
+      <div class="node dec">检查备份区App标识</div>
+      <div class="lbl n">存在&nbsp;&nbsp;→&nbsp;转入「回滚备份区App」子流程C</div>
+      <div class="arrow"></div>
+      <div class="lbl y">不存在</div>
+      <div class="node dec">检测按键是否按下</div>
+      <div class="lbl n">没有按下&nbsp;&nbsp;→&nbsp;<span class="node op" style="display:inline-block;padding:2px 10px">喂狗</span>&nbsp;→ 返回「检测按键」循环待机</div>
+      <div class="arrow"></div>
+      <div class="lbl y">按下</div>
+      <div class="node flag" style="border-style:dashed">进入「Ymodem协议」子流程 ↓</div>
+    </div>
+  </div>
+
+  <!-- ============ Ymodem协议 ============ -->
+  <div class="panel" style="min-width:320px">
+    <div class="panel-title">子流程D1：Ymodem协议</div>
+    <div class="col">
+      <div class="node dec">等待接收Ymodem首帧</div>
+      <div class="lbl n">N&nbsp;&nbsp;↺&nbsp;超时重试(继续等待)</div>
+      <div class="arrow"></div>
+      <div class="lbl y">Y</div>
+      <div class="node op">解析总数据包大小<br>=固件大小 + 1字节CRC8</div><div class="arrow"></div>
+      <div class="node op">擦除对应涉及的App的Flash区域</div><div class="arrow"></div>
+      <div class="node dec">等待接收Ymodem数据帧</div>
+      <div class="lbl n">N&nbsp;&nbsp;↺&nbsp;超时重试(继续等待)</div>
+      <div class="arrow"></div>
+      <div class="lbl y">Y</div>
+      <div class="node op">写入外部flash的A区域&nbsp;喂狗</div><div class="arrow"></div>
+      <div class="node dec">判断是否接收完毕</div>
+      <div class="lbl n">N&nbsp;&nbsp;↑&nbsp;返回「等待接收Ymodem数据帧」</div>
+      <div class="arrow"></div>
+      <div class="lbl y">Y</div>
+      <div class="node flag" style="border-style:dashed">进入「解密搬运A区数据」子流程 ↓</div>
+    </div>
+  </div>
+
+  <!-- ============ 解密搬运A区数据 ============ -->
+  <div class="panel" style="min-width:320px">
+    <div class="panel-title">子流程D2：解密搬运A区数据</div>
+    <div class="col">
+      <div class="node op">读取加密芯片获取AES密钥</div><div class="arrow"></div>
+      <div class="node op">读取A区数据1K到Ram<br>解密 并计算MD5</div><div class="arrow"></div>
+      <div class="node op">1K数据搬运到App运行区<br>喂狗</div><div class="arrow"></div>
+      <div class="node dec">判断是否搬运完毕</div>
+      <div class="lbl n">N&nbsp;&nbsp;↑&nbsp;返回「读取A区数据1K到Ram」</div>
+      <div class="arrow"></div>
+      <div class="lbl y">Y</div>
+      <div class="node dec">计算CRC与A区数据<br>最后16个MD5字节<br>比较进行MD5比较</div>
+      <div class="vline" style="height:14px"></div>
+      <div class="row">
+        <div class="down">
+          <div class="lbl y">Y</div>
+          <div class="node flag">设置扇区标志位为<br>(验证新App)</div>
+          <div class="arrow"></div>
+          <div class="node start">执行软复位</div>
+        </div>
+        <div class="down">
+          <div class="lbl n">N</div>
+          <div class="node op">串口传输<br>文件更新失败消息</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 回滚备份区App ============ -->
+  <div class="panel" style="min-width:320px">
+    <div class="panel-title">子流程C：回滚备份区App</div>
+    <div class="col">
+      <div class="node op">读取B区数据大小</div><div class="arrow"></div>
+      <div class="node op">擦除App运行区域flash</div><div class="arrow"></div>
+      <div class="node op">读取加密芯片获取AES密钥</div><div class="arrow"></div>
+      <div class="node op">读取B区数据1K到Ram<br>解密 并计算CRC</div><div class="arrow"></div>
+      <div class="node op">1K数据搬运到App运行区<br>喂狗</div><div class="arrow"></div>
+      <div class="node dec">判断是否搬运完毕</div>
+      <div class="lbl n">N&nbsp;&nbsp;↑&nbsp;返回「读取B区数据1K到Ram」</div>
+      <div class="arrow"></div>
+      <div class="lbl y">Y</div>
+      <div class="node dec">计算CRC与A区数据<br>最后16个MD5字节<br>比较进行CRC比较</div>
+      <div class="vline" style="height:14px"></div>
+      <div class="row">
+        <div class="down">
+          <div class="lbl y">Y</div>
+          <div class="node flag">设置扇区App标<br>识为 (有效App)</div>
+          <div class="arrow"></div>
+          <div class="node start">执行软复位</div>
+        </div>
+        <div class="down">
+          <div class="lbl n">N</div>
+          <div class="node flag">设置扇区App标<br>识为 (无效)</div>
+          <div class="arrow"></div>
+          <div class="node start">执行软复位</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 之前确认过的子流程A/B ============ -->
+<h2>③ 子流程A：App下载固件待更新（标识触发）</h2>
+<div class="canvas">
+  <div class="panel" style="min-width:300px">
+    <div class="col">
+      <div class="node op">初始化Mcu驱动</div><div class="arrow"></div>
+      <div class="node op">读取A区数据大小</div><div class="arrow"></div>
+      <div class="node op">擦除App运行区域flash</div><div class="arrow"></div>
+      <div class="node op">读取加密芯片获取AES密钥</div><div class="arrow"></div>
+      <div class="node op">读取A区数据1K到Ram<br>解密 并计算CRC</div><div class="arrow"></div>
+      <div class="node op">1K数据搬运到App运行区<br>喂狗</div><div class="arrow"></div>
+      <div class="node dec">判断是否搬运完毕</div>
+      <div class="lbl n">N&nbsp;&nbsp;↑&nbsp;返回「读取A区数据1K到Ram」</div>
+      <div class="arrow"></div>
+      <div class="lbl y">Y</div>
+      <div class="node dec">计算CRC与A区数据<br>最后16个MD5字节<br>比较进行MD5比较</div>
+      <div class="vline" style="height:14px"></div>
+      <div class="row">
+        <div class="down">
+          <div class="lbl y">Y</div>
+          <div class="node flag">设置扇区标志位为<br>(验证新App)</div>
+          <div class="arrow"></div>
+          <div class="node start">执行软复位</div>
+        </div>
+        <div class="down">
+          <div class="lbl n">N</div>
+          <div class="node flag" style="border-style:dashed">→ 转入<br>「回滚备份区App」</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">子流程B：验证新App</div>
+    <div class="col">
+      <div class="node flag">设置扇区App标<br>识为 (App验证中)</div><div class="arrow"></div>
+      <div class="node op">开启SS看门狗</div><div class="arrow"></div>
+      <div class="node start">跳转App</div>
+    </div>
+  </div>
+
+  <div class="panel" style="min-width:300px">
+    <div class="panel-title">子流程E：更新备份区App（A区搬运至B区）</div>
+    <div class="col">
+      <div class="node op">初始化Mcu驱动<br>喂狗</div><div class="arrow"></div>
+      <div class="node op">读取A区数据大小</div><div class="arrow"></div>
+      <div class="node op">A区读取1K数据搬运到B区<br>喂狗</div><div class="arrow"></div>
+      <div class="node dec">判断是否搬运完毕</div>
+      <div class="lbl n">N&nbsp;&nbsp;↑&nbsp;返回「A区读取1K数据搬运到B区」</div>
+      <div class="arrow"></div>
+      <div class="lbl y">Y</div>
+      <div class="node flag">设置扇区App标<br>识为 (有效App)</div>
+      <div class="arrow"></div>
+      <div class="node start">执行软复位</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ App流程（接口参考） ============ -->
+<h2>④ App流程（接口参考，App侧负责，但标志位与Bootloader共用）</h2>
+<div class="canvas">
+  <div class="panel" style="min-width:320px">
+    <div class="panel-title">App主线</div>
+    <div class="col">
+      <div class="node start">Power on</div><div class="arrow"></div>
+      <div class="node dec">① 检查当前App标识</div>
+      <div class="vline" style="height:14px"></div>
+      <div class="row">
+        <div class="down">
+          <div class="lbl">App验证中</div>
+          <div class="node flag">设置扇区App标<br>识为 (A区搬运至B区)</div>
+          <div class="arrow"></div>
+          <div class="node start">执行软复位</div>
+        </div>
+        <div class="down">
+          <div class="lbl">其余数据</div>
+          <div class="node start">执行软复位</div>
+        </div>
+        <div class="down">
+          <div class="lbl y">有效App</div>
+          <div class="node op">启动多线程<br>主线程+OTA线程分离</div>
+          <div class="arrow"></div>
+          <div class="node flag" style="border-style:dashed">四线程：主线程(Ui+核心)<br>OTA线程 / Flash线程 / 监控线程</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="min-width:340px">
+    <div class="panel-title">App的OTA线程（下载侧）</div>
+    <div class="col">
+      <div class="node op">智能下载策略<br>后台检查</div><div class="arrow"></div>
+      <div class="node dec">下载条件评估<br>判断当前状态</div>
+      <div class="lbl n">不满足下载条件&nbsp;↺&nbsp;返回继续检查</div>
+      <div class="vline" style="height:14px"></div>
+      <div class="row">
+        <div class="down">
+          <div class="lbl">繁忙</div>
+          <div class="node op">低速下载</div>
+          <div class="arrow"></div>
+          <div class="node op">非阻塞Ymodem</div>
+        </div>
+        <div class="down">
+          <div class="lbl y">空闲</div>
+          <div class="node op">高速下载</div>
+          <div class="arrow"></div>
+          <div class="node op">非阻塞Ymodem</div>
+        </div>
+      </div>
+      <div class="arrow"></div>
+      <div class="node flag" style="border-style:dashed">优化机制：异步接收 / 断点续传<br>进度反馈 / 双缓冲区 / 队列化Flash写入</div>
+      <div class="arrow"></div>
+      <div class="node dec">设置待更新标志位<br>下载完成，更新时机选择<br>提示用户更新</div>
+      <div class="vline" style="height:14px"></div>
+      <div class="row">
+        <div class="down">
+          <div class="lbl">用户选择</div>
+          <div class="node op">主动更新</div>
+          <div class="arrow"></div>
+          <div class="node start">执行软复位</div>
+        </div>
+        <div class="down">
+          <div class="lbl">普通更新</div>
+          <div class="node op">合适时机更新</div>
+          <div class="arrow"></div>
+          <div class="node dec">等待进入休眠条件</div>
+          <div class="lbl n">不满足&nbsp;↺&nbsp;继续等待</div>
+          <div class="arrow"></div>
+          <div class="lbl y">满足</div>
+          <div class="node start">执行软复位</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="text-align:center;color:#888;font-size:12px">
+  图例：<span class="node start" style="display:inline-block;padding:2px 10px">紫 = 起止/软复位</span>
+  <span class="node op" style="display:inline-block;padding:2px 10px">绿 = 操作</span>
+  <span class="node dec" style="display:inline-block;padding:2px 10px">黄 = 判断</span>
+  <span class="node flag" style="display:inline-block;padding:2px 10px">红 = 设置扇区标志</span>
+</p>
+
+</body>
+</html>

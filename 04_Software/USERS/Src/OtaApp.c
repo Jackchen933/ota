@@ -9,7 +9,7 @@
  *
  * @brief APP 侧「后台无感下载」OTA 实现。
  *
- * @version V2.0
+ * @version V2.1  传输层由自定义推流改为标准 Ymodem 接收端
  *
  * @note 1 tab == 4 spaces!
  *
@@ -17,6 +17,7 @@
 
 /* 包含头文件 *******************************************************************************************/
 #include "OtaApp.h"
+#include "OtaFlag.h"
 #include "Eeprom.h"
 #include "W25q64.h"
 #include "usart.h"
@@ -45,8 +46,10 @@
 /* App 映像大小。
    用 Keil 链接器符号算：ER_IROM1 的结束地址减去 A 区基址。
    armcc 允许标识符里出现 '$'，所以 Image$$ER_IROM1$$Limit 能直接声明。
-   这个值写进 EEPROM 的"当前App字节大小"，服务器据此知道板子上是哪一版。 */
-#define OTA_APP_BASE            0x08008000UL
+   这个值写进 EEPROM 的"当前App字节大小"，服务器据此知道板子上是哪一版。
+   A 区基址 = 0x0800C000：Boot 32KB + 标志扇区 16KB 之后才是 App，
+   与 04_Software.sct / system_stm32f4xx.c 的 VECT_TAB_OFFSET 三处同步 */
+#define OTA_APP_BASE            0x0800C000UL
 
 /* 私有类型 *********************************************************************************************/
 
@@ -59,7 +62,23 @@ typedef struct
     uint32_t  session;  /* 第几轮下载。变了就说明是新的一轮，写指针要回到起点 */
 } OtaFrame_t;
 
+/* Ymodem 接收子状态机：逐字节推进一帧的接收 */
+typedef enum
+{
+    YM_RX_HEAD = 0,     /* 等帧头(SOH/STX/EOT/CAN) */
+    YM_RX_SEQ,          /* 序号 */
+    YM_RX_SEQC,         /* 序号反码 */
+    YM_RX_DATA,         /* 数据区(边收边算CRC) */
+    YM_RX_CRC_HI,       /* CRC 高字节 */
+    YM_RX_CRC_LO        /* CRC 低字节 -> 整帧校验 */
+} YmRxState_t;
+
 /* 私有变量 *********************************************************************************************/
+
+/* 链接器符号: App 映像的结束地址(sct 里执行区名 ER_IROM1)。
+   armclang(AC6) 同样支持 '$' 标识符, 但必须显式 extern 声明, 不声明就是
+   "identifier undefined" —— 之前缺的就是这一行 */
+extern unsigned char Image$$ER_IROM1$$Limit;
 
 /* ---- 串口接收通道 ---- */
 __align(4) static uint8_t s_stream_storage[OTA_STREAM_SIZE];
@@ -97,7 +116,31 @@ static uint8_t  s_uart_error;               /* 串口出错标志(中断里置�
 static uint32_t s_session;                  /* 下载轮次，每进入一次下载 +1 */
 static volatile uint8_t s_wr_error;         /* 下载线程写 W25Q64 失败，OTA 线程据此中止本轮 */
 
+/* ---- Ymodem 接收会话 ----
+   帧数据先进这里攒着，CRC 校验通过才 memcpy 进 4KB 缓冲：
+   坏帧 NAK 重传时缓冲还没被污染，不需要回滚 */
+__align(4) static uint8_t s_ym_frame[YM_BLK_1024];
+
+static YmRxState_t s_ym_state;              /* 接收子状态机 */
+static uint16_t s_ym_frame_len;             /* 本帧数据区长(128/1024) */
+static uint16_t s_ym_data_cnt;              /* 本帧已收数据字节数 */
+static uint16_t s_ym_crc_calc;              /* 数据区增量 CRC */
+static uint8_t  s_ym_crc_hi;                /* 收到的 CRC 高字节 */
+static uint8_t  s_ym_seq;                   /* 本帧序号 */
+static uint8_t  s_ym_expected;              /* 期望的下一个数据帧序号 */
+static uint8_t  s_ym_got_name;              /* 帧0(文件名)已确认 */
+static uint8_t  s_ym_eot_phase;             /* EOT 握手 0=传数据 1=回过NAK 2=等结束帧 */
+static uint8_t  s_ym_can_cnt;               /* CAN 连击计数 */
+static uint8_t  s_ym_c_cnt;                 /* 'C' 已发次数 */
+static uint32_t s_ym_file_size;             /* 帧0解析出的文件大小(写标志扇区用) */
+
 /* 私有函数 *********************************************************************************************/
+
+/* Ymodem 组引用了文件后部定义的缓冲/收尾函数，先给原型保证先声明后使用 */
+static void Ota_BufTake(uint8_t id);
+static void Ota_BufCommit(uint8_t id, uint16_t len);
+static void Ota_WaitAllWritten(void);
+static void Ota_FinishDownload(void);
 
 /********************************************************************************************************
   * @函数名称：Ota_SendCmd
@@ -156,6 +199,311 @@ static void Ota_CmdReset(void)
 {
     s_cmd_cnt = 0U;
     (void)memset(s_cmd_win, 0, sizeof(s_cmd_win));
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_YmTx1
+  * @函数说明：向对端发 1 个 Ymodem 控制字节(ACK/NAK/'C'/CAN)
+  * @注意事项：阻塞发送，只在 OTA 任务上下文调用。
+  *******************************************************************************************************/
+static void Ota_YmTx1(uint8_t b)
+{
+    (void)HAL_UART_Transmit(&huart1, &b, 1U, OTA_TX_TIMEOUT_MS);
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_Crc16Upd
+  * @函数说明：CRC16-XMODEM 增量更新(多项式0x1021, 初值0x0000, 不反射不异或)
+  * @入口参数：crc —— 上一轮累计值(首字节前传0x0000)；byte —— 新字节
+  * @返回参数：更新后的 CRC
+  * @注意事项：逐位实现，1024字节约0.2ms@100MHz，不值得为查表费512B ROM。
+  *           只算数据区(帧头/序号/CRC本身不参与)，与标准 Ymodem 一致。
+  *******************************************************************************************************/
+static uint16_t Ota_Crc16Upd(uint16_t crc, uint8_t byte)
+{
+    uint8_t i;
+
+    crc ^= (uint16_t)((uint16_t)byte << 8U);
+
+    for (i = 0U; i < 8U; i++)
+    {
+        if ((crc & 0x8000U) != 0U)
+        {
+            crc = (uint16_t)((uint16_t)(crc << 1U) ^ 0x1021U);
+        }
+        else
+        {
+            crc = (uint16_t)(crc << 1U);
+        }
+    }
+
+    return crc;
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_YmSessionReset
+  * @函数说明：复位 Ymodem 会话变量。进入下载态(或中止后重启)时调用
+  *******************************************************************************************************/
+static void Ota_YmSessionReset(void)
+{
+    s_ym_state     = YM_RX_HEAD;
+    s_ym_frame_len = 0U;
+    s_ym_data_cnt  = 0U;
+    s_ym_crc_calc  = 0U;
+    s_ym_seq       = 0U;
+    s_ym_expected  = 1U;        /* 数据帧序号从 0x01 开始，帧0 是 0x00 */
+    s_ym_got_name  = 0U;
+    s_ym_eot_phase = 0U;
+    s_ym_can_cnt   = 0U;
+    s_ym_c_cnt     = 0U;
+    s_ym_file_size = 0U;
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_YmParseSize
+  * @函数说明：从帧0数据区解析文件大小：文件名'\0'后跟十进制ASCII大小串
+  * @返回参数：文件字节数；解析失败返回 0(调用方回退用实际收到的字节数)
+  *******************************************************************************************************/
+static uint32_t Ota_YmParseSize(const uint8_t *data, uint16_t len)
+{
+    uint16_t i     = 0U;
+    uint32_t val   = 0U;
+    uint8_t  digit = 0U;
+
+    while ((i < len) && (data[i] != 0U))
+    {
+        i++;                                /* 跳过文件名 */
+    }
+    i++;                                    /* 跳过 '\0' */
+
+    while ((i < len) && (data[i] >= '0') && (data[i] <= '9'))
+    {
+        val = (val * 10U) + (uint32_t)(data[i] - '0');
+        digit++;
+        i++;
+    }
+
+    return (digit != 0U) ? val : 0U;
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_YmToBuf
+  * @函数说明：把校验通过的帧数据填进当前 4KB 缓冲，满块则交下载线程
+  * @注意事项：BufTake 会阻塞等下载线程写完 Flash(典型130ms)。停等协议下
+  *           对端在等我们的 ACK 不会推数据，这里阻塞是安全的；
+  *           ACK 由调用方在【本函数返回后】才发 —— ACK 门槛 = 数据落 RAM 缓冲。
+  *******************************************************************************************************/
+static void Ota_YmToBuf(const uint8_t *data, uint16_t len)
+{
+    if (s_cur_len == 0U)
+    {
+        Ota_BufTake(s_cur_buf);
+    }
+
+    (void)memcpy(&s_buf[s_cur_buf][s_cur_len], data, len);
+    s_cur_len = (uint16_t)(s_cur_len + len);
+    s_total  += len;
+
+    if (s_cur_len >= OTA_BUF_SIZE)
+    {
+        Ota_BufCommit(s_cur_buf, s_cur_len);
+
+        s_cur_buf = (uint8_t)((s_cur_buf + 1U) % OTA_BUF_COUNT);
+        s_cur_len = 0U;
+    }
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_YmAbort
+  * @函数说明：中止本轮 Ymodem 下载：等落盘、清 EEPROM 标志、回等待态
+  * @入口参数：send_can —— 1: 先发 CAN CAN 通知对端挂断；0: 静默退出
+  *******************************************************************************************************/
+static void Ota_YmAbort(uint8_t send_can)
+{
+    if (send_can != 0U)
+    {
+        Ota_YmTx1(YM_CAN);
+        Ota_YmTx1(YM_CAN);
+    }
+
+    Ota_WaitAllWritten();
+    (void)OtaEe_SetState(OTA_STATE_NONE);
+    Ota_CmdReset();
+    s_state = OTA_ST_WAIT_REQ_DOWNLOAD;
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_YmFrameDone
+  * @函数说明：一帧收完(CRC两字节已到)：整帧校验并分发处理
+  * @注意事项：ACK 门槛 = 数据落 RAM 缓冲(Ota_YmToBuf 返回后)；重复序号
+  *           只重发 ACK 不重复填数据 —— 那是"上个ACK丢了"的对端重传。
+  *******************************************************************************************************/
+static void Ota_YmFrameDone(uint16_t crc_rx)
+{
+    s_ym_state = YM_RX_HEAD;                /* 无论成败，本帧到此结束 */
+
+    if (crc_rx != s_ym_crc_calc)
+    {
+        Ota_YmTx1(YM_NAK);                  /* 坏帧重传；缓冲未被污染 */
+        return;
+    }
+
+    if (s_ym_seq == 0U)
+    {
+        /* ---- 帧0：文件名帧，或收尾的空文件名结束帧 ---- */
+        if (s_ym_frame[0] == 0U)
+        {
+            if (s_ym_eot_phase == 2U)
+            {
+                Ota_YmTx1(YM_ACK);          /* 会话正式结束 */
+                Ota_FinishDownload();       /* 等落盘->写标志->回0x44.. */
+            }
+            return;
+        }
+
+        if (s_ym_got_name != 0U)
+        {
+            Ota_YmTx1(YM_ACK);              /* 帧0重发(上个ACK丢了)，重确认 */
+            Ota_YmTx1(YM_CRC_CH);
+        }
+        else
+        {
+            s_ym_file_size = Ota_YmParseSize(s_ym_frame, s_ym_frame_len);
+            s_ym_got_name  = 1U;
+            s_ym_expected  = 1U;
+            s_ym_eot_phase = 0U;
+            Ota_YmTx1(YM_ACK);
+            Ota_YmTx1(YM_CRC_CH);           /* 请求数据帧 */
+        }
+        return;
+    }
+
+    /* ---- 数据帧 ---- */
+    if (s_ym_eot_phase == 2U)
+    {
+        Ota_YmAbort(1U);                    /* 结束阶段还来数据帧 = 流已乱 */
+        return;
+    }
+
+    if (s_ym_seq == s_ym_expected)
+    {
+        Ota_YmToBuf(s_ym_frame, s_ym_frame_len);
+        s_ym_expected++;
+        Ota_YmTx1(YM_ACK);
+    }
+    else if (s_ym_seq == (uint8_t)(s_ym_expected - 1U))
+    {
+        Ota_YmTx1(YM_ACK);                  /* 重复帧：重ACK，不重复填 */
+    }
+    else
+    {
+        Ota_YmAbort(1U);                    /* 跳号，序号链断了，中止 */
+    }
+}
+
+/********************************************************************************************************
+  * @函数名称：Ota_YmFeed
+  * @函数说明：Ymodem 接收状态机，按当前子状态处理一个收到的字节
+  *******************************************************************************************************/
+static void Ota_YmFeed(uint8_t b)
+{
+    switch (s_ym_state)
+    {
+        case YM_RX_HEAD:
+        {
+            if ((b == YM_SOH) || (b == YM_STX))
+            {
+                s_ym_frame_len = (b == YM_SOH) ? YM_BLK_128 : YM_BLK_1024;
+                s_ym_data_cnt  = 0U;
+                s_ym_crc_calc  = 0U;
+                s_ym_state     = YM_RX_SEQ;
+            }
+            else if (b == YM_EOT)
+            {
+                /* EOT 双次握手(标准流程)：第一次 NAK 让发送方确认文件
+                   真发完了，第二次 ACK+'C' 进入结束帧阶段 */
+                if (s_ym_eot_phase == 0U)
+                {
+                    s_ym_eot_phase = 1U;
+                    Ota_YmTx1(YM_NAK);
+                }
+                else
+                {
+                    s_ym_eot_phase = 2U;
+                    Ota_YmTx1(YM_ACK);
+                    Ota_YmTx1(YM_CRC_CH);   /* 要结束帧(空文件名帧) */
+                }
+            }
+            else if (b == YM_CAN)
+            {
+                s_ym_can_cnt++;
+                if (s_ym_can_cnt >= 2U)
+                {
+                    Ota_YmAbort(0U);        /* 对端取消，静默退出 */
+                }
+            }
+            else
+            {
+                s_ym_can_cnt = 0U;          /* 杂散字节忽略 */
+            }
+            break;
+        }
+
+        case YM_RX_SEQ:
+        {
+            s_ym_seq   = b;
+            s_ym_state = YM_RX_SEQC;
+            break;
+        }
+
+        case YM_RX_SEQC:
+        {
+            if ((uint8_t)(b ^ 0xFFU) != s_ym_seq)
+            {
+                Ota_YmTx1(YM_NAK);          /* 序号对不上反码，整帧报废 */
+                s_ym_state = YM_RX_HEAD;
+            }
+            else
+            {
+                s_ym_state = YM_RX_DATA;
+            }
+            break;
+        }
+
+        case YM_RX_DATA:
+        {
+            s_ym_frame[s_ym_data_cnt] = b;
+            s_ym_data_cnt++;
+            s_ym_crc_calc = Ota_Crc16Upd(s_ym_crc_calc, b);
+
+            if (s_ym_data_cnt >= s_ym_frame_len)
+            {
+                s_ym_state = YM_RX_CRC_HI;
+            }
+            break;
+        }
+
+        case YM_RX_CRC_HI:
+        {
+            s_ym_crc_hi = b;
+            s_ym_state  = YM_RX_CRC_LO;
+            break;
+        }
+
+        case YM_RX_CRC_LO:
+        {
+            uint16_t crc_rx = (uint16_t)(((uint16_t)s_ym_crc_hi << 8U) | (uint16_t)b);
+
+            Ota_YmFrameDone(crc_rx);
+            break;
+        }
+
+        default:
+        {
+            s_ym_state = YM_RX_HEAD;
+            break;
+        }
+    }
 }
 
 /********************************************************************************************************
@@ -227,16 +575,41 @@ static void Ota_WaitAllWritten(void)
 
 /********************************************************************************************************
   * @函数名称：Ota_FinishDownload
-  * @函数说明：数据传输结束的收尾：冲尾巴 -> 等落盘 -> 写 EEPROM -> 回正响应
+  * @函数说明：数据传输结束的收尾：冲尾巴 -> 等落盘 -> 写标志 -> 回正响应
+  * @注意事项：写标志扇区是升级的"判决书"，要最后写：
+  *           1. 先等 W25Q64 全部落盘 —— 数据没落盘就置标志，掉电后 Boot
+  *              会拿半截密文去升级；
+  *           2. 再写标志扇区(EaSize + 状态0x11) —— 这是给 Bootloader 看的，
+  *              下次复位它读到 0x11 就会把 W25Q64 A区域的密文搬到 App 运行区；
+  *              EEPROM 那份只是 App/服务器侧的记录，Boot 不读它。
+  *           3. 全部成功后才回 0x44 0x55 0x66 正响应。
+  *           写标志含整扇区擦除，会卡约 1 秒(见 OtaFlag.c 说明)，此时下载
+  *           已经结束，不影响收包。
   *******************************************************************************************************/
 static void Ota_FinishDownload(void)
 {
+    /* EaSize 优先用帧0里声明的文件大小：Ymodem 会把文件用 0x1A 填充到
+       1024 整数倍，s_total 含填充字节，直接拿去写标志会让 Boot 的包长
+       互验(cipher_len == 16 + body_len + 16)失败。解析不出来才回退 s_total */
+    uint32_t ea_size = (s_ym_file_size != 0U) ? s_ym_file_size : s_total;
+
     Ota_FlushPartial();
     Ota_WaitAllWritten();
 
-    /* 落盘完成，才把状态从"下载中"改成"请求更新"。
-       顺序不能反：先写 0x22 的话，万一这中间掉电，Boot 会以为固件是完整的 */
-    (void)OtaEe_SetNewAppSize(s_total);
+    /* 给 Bootloader 的判决书：A区密文大小 + 状态"App下载固件待更新"。
+       这步失败(极少见)就不回正响应，让服务器重传 —— Boot 不知道这次
+       下载，A区数据当不存在 */
+    if (OtaFlag_SetDownloadDone(ea_size) != 0U)
+    {
+        (void)OtaEe_SetState(OTA_STATE_NONE);
+        Ota_CmdReset();
+        s_state = OTA_ST_WAIT_REQ_DOWNLOAD;
+        return;
+    }
+
+    /* App/服务器侧的记录(EEPROM): 状态从"下载中"改成"请求更新"。
+       和标志扇区是两本账: 这本给服务器/调试看, 标志扇区给 Boot 看 */
+    (void)OtaEe_SetNewAppSize(ea_size);
     (void)OtaEe_SetState(OTA_STATE_REQ_UPDATE);
 
     /* 后台下载完毕，返回正响应 */
@@ -268,13 +641,13 @@ static void Ota_EnterDownload(void)
        最多是白等，不会拿半截固件去刷 A 区 */
     (void)OtaEe_SetState(OTA_STATE_DOWNLOADING);
 
+    Ota_YmSessionReset();
     Ota_CmdReset();
     s_state = OTA_ST_DOWNLOAD;
 
-    /* 注意这里【不能】xStreamBufferReset(s_stream)。
-       命令是 3 个字节，服务器很可能把 0x33 和数据连着一起发过来；
-       等匹配上 0x33 时，后面的数据已经在流缓冲里了，一 reset 就全丢。
-       命令由滑动窗口消费掉，其余字节自然进入数据通道，不需要清缓冲。 */
+    /* Ymodem 是接收方主导的协议：主动发 'C' 请求 CRC 模式，
+       终端工具收到后才开始发帧0。空闲超时由 Ota_CheckIdle 负责重发 */
+    Ota_YmTx1(YM_CRC_CH);
 }
 
 /********************************************************************************************************
@@ -297,26 +670,10 @@ static void Ota_ConsumeByte(uint8_t b)
             break;
         }
 
-        /* ---------------- 下载中 ---------------- */
+        /* ---------------- 下载中(Ymodem 接收) ---------------- */
         case OTA_ST_DOWNLOAD:
         {
-            /* 开始填一块新缓冲前，先确认它上一轮已经写完了 */
-            if (s_cur_len == 0U)
-            {
-                Ota_BufTake(s_cur_buf);
-            }
-
-            s_buf[s_cur_buf][s_cur_len] = b;
-            s_cur_len++;
-            s_total++;
-
-            if (s_cur_len >= OTA_BUF_SIZE)
-            {
-                Ota_BufCommit(s_cur_buf, s_cur_len);
-
-                s_cur_buf = (uint8_t)((s_cur_buf + 1U) % OTA_BUF_COUNT);
-                s_cur_len = 0U;
-            }
+            Ota_YmFeed(b);
             break;
         }
 
@@ -341,10 +698,10 @@ static void Ota_ConsumeByte(uint8_t b)
 
 /********************************************************************************************************
   * @函数名称：Ota_CheckIdle
-  * @函数说明：靠"串口空闲"判断一帧结束 / 整个下载结束
-  * @注意事项：本工程的上位机是连续推流、没有显式结束命令，所以用空闲时长来判。
-  *           如果你的服务器会发一条专门的结束命令，把 OTA_END_IDLE_MS 那段
-  *           换成命令匹配即可，其余逻辑不用动。
+  * @函数说明：Ymodem 会话超时监督。正常收发由 ACK/NAK 驱动，帧间隔毫秒级，
+  *           空闲到超时只可能是异常
+  * @注意事项：握手段(还没收到帧0)空闲 -> 重发'C'，超次数放弃；
+  *           收到帧0后空闲 -> 对端死了/线断了，中止本轮。
   *******************************************************************************************************/
 static void Ota_CheckIdle(void)
 {
@@ -357,23 +714,29 @@ static void Ota_CheckIdle(void)
 
     idle = (uint32_t)osKernelGetTickCount() - s_last_rx_tick;
 
-    /* 注意不能只在 idle >= FRAME 时就冲尾巴：那样每来一小段就交一块，
-       缓冲被切得很碎。这里只在真正结束(END_IDLE)时冲一次尾巴，
-       中间的停顿继续往当前缓冲里攒 */
-    if (idle >= OTA_END_IDLE_MS)
+    if (idle < OTA_END_IDLE_MS)
     {
-        if (s_total > 0U)
+        return;
+    }
+
+    if (s_ym_got_name == 0U)
+    {
+        /* 还在等对端响应 'C'：重发，超过次数就放弃本轮 */
+        if (s_ym_c_cnt < YM_C_MAX_RETRY)
         {
-            Ota_FinishDownload();
+            s_ym_c_cnt++;
+            Ota_YmTx1(YM_CRC_CH);
+            s_last_rx_tick = (uint32_t)osKernelGetTickCount();
         }
         else
         {
-            /* 一个字节都没收到就超时：服务器只发了进入命令就撤了，
-               退回等待状态，EEPROM 标志也清掉 */
-            (void)OtaEe_SetState(OTA_STATE_NONE);
-            Ota_CmdReset();
-            s_state = OTA_ST_WAIT_REQ_DOWNLOAD;
+            Ota_YmAbort(0U);        /* 30 秒没人来，悄悄退出 */
         }
+    }
+    else
+    {
+        /* 传到一半对端没了(互等死锁/拔线)：发 CAN 挂断，回等待态 */
+        Ota_YmAbort(1U);
     }
 }
 
