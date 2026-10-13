@@ -69,6 +69,11 @@ uint8_t Flash_erase(u32 addr, u32 size)
         if ((Flash_Sectorsize[i] >= flash_start_sector) && (Flash_Sectorsize[i] <= flash_end_sector))
         {
             if (EraseAppSector(Flash_Sectorsize[i]) != FLASH_COMPLETE) return 1;
+            /* 大固件(311KB)要擦 sector 3/4/5/6 = 336KB, F411 大扇区擦除
+               典型 5s / 最坏 10s+, 超过 IWDG 8.2s 超时 -> 擦完就咬死复位,
+               标志还是 DOWNLOAD_DONE -> 再擦 -> 死循环 = 永远黑屏。
+               (2026-10-13 界面包 OTA 实测) 每擦完一个扇区喂一次狗 */
+            IWDG->KR = 0xAAAA;
         }
     }
     return 0;
